@@ -160,6 +160,17 @@ def save_emploi_from_scraped(d: dict) -> EmploiRadar:
         "emplacement": emplacement[:150] if emplacement else None,
     }
 
+    # 1) essaie de déduire le contrat depuis le scraping
+    contrat_obj = pick_contrat_obj(d.get("type"))
+
+    # 2) fallback obligatoire: "Autre"
+    if contrat_obj is None:
+        contrat_obj = TypeContratRadar.objects.filter(nom__iexact="Autre").first()
+        if contrat_obj is None:
+            # si jamais "Autre" n'existe pas encore, on le crée ici pour éviter l'erreur
+            contrat_obj, _ = TypeContratRadar.objects.get_or_create(nom="Autre")
+
+
     # nom des FKs selon ton modèle (tu as défini les champs comme 'region' et 'contrat',
     # mais si tu as réellement 'emploi_region'/'emploi_contrat', remplace ci-dessous)
     fk_kwargs = {}

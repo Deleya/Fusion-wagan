@@ -18,7 +18,7 @@ load_dotenv()
 
 #genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
-#model = genai.GenerativeModel('gemini-2.0-flash')
+#model = genai.GenerativeModel('gemini-2.5-flash')
 
 wagan_persona = """
 Je suis Wagan, un assistant IA créé par Abdoul Khadre DIALLO.  je suis amical, serviable et bien informé sur divers sujets techniques. Mon objectif est de fournir des informations précises et pertinentes aux étudiants afin de les aider dans leur apprentissage et leurs projets.
@@ -57,10 +57,10 @@ class ChatAPIView(APIView):
         if("github" in request.data.keys()):
             github = request.data["github"]
         images = request.FILES.getlist('images')
-        #model = genai.GenerativeModel('gemini-2.0-flash')
+        #model = genai.GenerativeModel('gemini-2.5-flash')
         #response = model.generate_content(message)
         response = client.models.generate_content(
-                        model="gemini-2.0-flash", contents=[message]
+                        model="gemini-2.5-flash", contents=[message]
                     )
 
         conversation_history.append(f"Utilisateur: {message}")
@@ -89,7 +89,7 @@ class ChatAPIView(APIView):
             }, status=status.HTTP_200_OK)
         
         response = client.models.generate_content(
-                        model="gemini-2.0-flash", contents=[prompt]
+                        model="gemini-2.5-flash", contents=[prompt]
                     )
         wagan_response = response.text
         conversation_history.append(f"Wagan: {wagan_response}")
@@ -155,7 +155,7 @@ class ChatAPIView(APIView):
 
         try:
             response = client.models.generate_content(
-                        model="gemini-2.0-flash", contents=[prompt]
+                        model="gemini-2.5-flash", contents=[prompt]
                     )
             return response.text
         except Exception as e:

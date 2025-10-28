@@ -1,12 +1,17 @@
+import os
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 
+from bakeli_learning.serializers.chatbot import ConversationPairsSerializer, SendMessagePairsResponseSerializer
 from chatbot.serializers import ChatResponseSerializer
 from ..models import ChatSession, Message
 from ..serializers import ChatSessionSerializer, MessageSerializer
 import requests
 from chatbot.constantes.constante import WAGAN_PERSONA,client
+from dotenv import load_dotenv
+
+load_dotenv()
 
 class StartChatSession(APIView):
     def post(self, request):
@@ -38,82 +43,126 @@ class ChatMessage(APIView):
         # Enregistrer réponse bot
         msg_bot = Message.objects.create(session=session, sender="bot", content=response_text)
 
-        return Response({
-            "user_message": MessageSerializer(msg_user).data,
-            "bot_message": MessageSerializer(msg_bot).data
-        })
+        #return Response({
+        #    "user_message": MessageSerializer(msg_user).data,
+        #    "bot_message": MessageSerializer(msg_bot).data
+        #})
+        # 5) renvoyer l’historique groupé par paires
+        qs = Message.objects.filter(session=session).order_by("timestamp", "id")
+        pairs = []
+        current_user = None
+        for m in qs:
+            if m.sender == "user":
+                if current_user is not None:
+                    pairs.append({"user": MessageSerializer(current_user).data, "bot": None})
+                current_user = m
+            elif m.sender == "bot":
+                if current_user is None:
+                    pairs.append({"user": None, "bot": MessageSerializer(m).data})
+                else:
+                    pairs.append({
+                        "user": MessageSerializer(current_user).data,
+                        "bot":  MessageSerializer(m).data
+                    })
+                    current_user = None
 
-    def get_bot_response(self, prompt, session):
-        API_KEY = "VOTRE_CLE_GEMINI"
+        if current_user is not None:
+            pairs.append({"user": MessageSerializer(current_user).data, "bot": None})
 
-        # 1. Connaissances statiques
-        static_knowledge = """
-        Bienvenue sur notre site !
-        Nous proposons :
-        - Développement d'applications web
-        - Formations en intelligence artificielle
-        - Formations Analyse de Données
-        - Service client 24h/24 
-        """
+        return Response(pairs) 
+        #return Response(SendMessagePairsResponseSerializer(payload).data, status=200)
+        #return Response({
+        #    "user_message": MessageSerializer(msg_user).data,
+        #    "bot_message": MessageSerializer(msg_bot).data
+        #})
 
-        # 2. Récupérer des données d’une API externe (exemple : météo ou produits)
+    def get_bot_response(self, prompt: str, session):
+        API_KEY = os.getenv("GOOGLE_API_KEY")
+
+        GENERATION_CONFIG = {
+            "max_output_tokens": 256,
+            "temperature": 0.6,
+            "top_p": 0.9,
+            "candidate_count": 1,
+            "response_mime_type": "text/plain",
+        }
+
+        # 1) Connaissances statiques / persona
+        static_knowledge = (
+            "Bienvenue sur notre site !\n"
+            "Nous proposons :\n"
+            "- Développement d'applications web\n"
+            "- Formations en intelligence artificielle\n"
+            "- Formations Analyse de Données\n"
+            "- Service client 24h/24\n"
+        )
+
+        persona = WAGAN_PERSONA  # garde ta constante
+
+        # 3) Contenus Gemini: system_instruction + historique minimal
+        system_instruction = (
+            f"{persona}\n\n"
+            "Tu réponds en français, de façon claire et concise. Maximum 25 mots\n"
+            "Contexte fixe de l'organisation: "
+            "Développement d'apps web, formations IA et Data, support 24/7."
+        )
+
+        # 2) Contexte dynamique externe (optionnel)
         api_context = ""
         try:
-            api_response = requests.get("https://api.exemple.com/infos-actuelles")
+            api_response = requests.get("https://api.exemple.com/infos-actuelles", timeout=5)
             if api_response.status_code == 200:
                 data = api_response.json()
-                api_context = f"\nInformations du jour : {data.get('infos', 'non disponible')}"
-        except:
-            api_context = "\nAucune information dynamique disponible pour le moment."
+                api_context = f"Informations du jour : {data.get('infos', 'non disponible')}"
+        except Exception:
+            api_context = "Aucune information dynamique disponible pour le moment."
 
-        # 3. Construire un prompt enrichi
-        full_prompt = f"""
-        CONTEXTE :
-        {static_knowledge}
-        {WAGAN_PERSONA}
-        {api_context}
+        # 3) Construire l'historique multi-tours (dernier N)
+        N = 8  # ajuste selon ta limite de tokens
+        past = list(session.messages.order_by("-timestamp")[:N])[::-1]  # oldest→newest
 
-        QUESTION DE L'UTILISATEUR :
-        {prompt}
+        # 4) Construire les contents au format Gemini (rôles + parts)
+        #    On met le "brief" (persona + statique + contexte API) au tout début comme consigne.
+        limit_instruction = (
+        "Réponds en UNE SEULE phrase, au maximum 20 mots. "
+        "N’ajoute pas d’explications, pas de liste, pas d’emoji."
+        )
+        contents = [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": limit_instruction},
+                    {
+                        "text": (
+                            "Contexte et persona (réponds en français, clair et concis) Donne au maximum 20 mots :\n"
+                            f"{persona}\n\n"
+                            f"{static_knowledge}\n"
+                            f"{api_context}\n"
+                            )
+                    }
+                ]
+            }
+        ]
 
-        RÉPONDS de manière claire et concise.
-        """
-
-        # 4. Appel Gemini
-        #response = requests.post(
-        #    f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={API_KEY}",
-        #    json={"contents": [{"parts": [{"text": full_prompt}]}]}
-        #)
-
-        # 3. Construire l’historique de conversation
-        messages = session.messages.order_by("timestamp")
-        conversation = []
-
-        
-        # Ajouter le contexte initial
-        conversation.append({
-            "role": "user",
-            "text": f"{full_prompt}\n{api_context}"
-        })
-
-        for msg in messages:
+        # Historique
+        for msg in past:
             if msg.sender == "user":
-                conversation.append({"role": "user", "text": msg.content})
+                contents.append({"role": "user",  "parts": [{"text": msg.content}]})
             else:
-                conversation.append({"role": "model", "text": msg.content})
+                contents.append({"role": "model", "parts": [{"text": msg.content}]})
 
-        # Ajouter le dernier message utilisateur (utile si pas encore enregistré)
-        conversation.append({"role": "user", "text": prompt})
+        # Dernier message utilisateur (celui reçu en paramètre)
+        contents.append({"role": "user", "parts": [{"text": prompt}]})
 
+        # 5) Appel Gemini avec l'historique
         try:
-            response = client.models.generate_content(
-                    model="gemini-2.0-flash", contents=[full_prompt]
-                )
-            response_text = response.text
-            response_serializer = ChatResponseSerializer({"response": response_text})
-            return response_serializer.data['response']
-        except Exception as e:
-            return Response(
-                {"error": f"Erreur lors de la communication avec le modèle de langage : {str(e)}"},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=contents,
             )
+            text = (resp.text or "").strip()
+            return text if text else "Désolé, je n'ai pas pu générer de réponse."
+        except Exception as e:
+            # Ne retourne pas un Response DRF ici — remonte un message simple
+            return f"Désolé, erreur lors de l'appel au modèle : {e}"
+

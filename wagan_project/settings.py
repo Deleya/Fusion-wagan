@@ -20,6 +20,8 @@ load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+BAKELI_AI_URL = os.getenv("BAKELI_AI_URL", default="https://ai.bakeli.tech")
+BAKELI_AI_KEY = os.getenv("BAKELI_AI_KEY")
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/3.1/howto/deployment/checklist/

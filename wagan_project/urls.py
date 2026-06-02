@@ -24,6 +24,10 @@ urlpatterns = [
     path('api/', include('bakeli_learning.urls')),
     path('api/', include('easycompta.urls')),
     path('api/', include('radar.urls')),
+    path('api/auth/', include('djoser.urls')),
+    path('api/auth/', include('djoser.urls.jwt')),
+    path('api/auth/social/', include('social_django.urls', namespace='social')),
+    path('api/auth/', include('djoser.social.urls')),
 
     # Swagger & Redoc
     re_path(r"^api/swagger/$", schema_view.with_ui("swagger", cache_timeout=0), name="schema-swagger-ui"),

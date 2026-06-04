@@ -28,6 +28,7 @@ urlpatterns = [
     path('api/auth/', include('djoser.urls.jwt')),
     path('api/auth/social/', include('social_django.urls', namespace='social')),
     path('api/auth/', include('djoser.social.urls')),
+    path('whatsapp/', include('whatsapp_bot.urls')),
 
     # Swagger & Redoc
     re_path(r"^api/swagger/$", schema_view.with_ui("swagger", cache_timeout=0), name="schema-swagger-ui"),

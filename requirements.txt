@@ -28,7 +28,6 @@ et-xmlfile==1.1.0
 etelemetry==0.3.1
 exceptiongroup==1.2.2
 filelock==3.18.0
-fitz==0.0.1.dev2
 google-ai-generativelanguage==0.6.15
 google-api-core==2.24.1
 google-api-python-client==2.162.0

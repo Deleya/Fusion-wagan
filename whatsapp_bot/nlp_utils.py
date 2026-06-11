@@ -36,7 +36,7 @@ Le champ 'score' est ta confiance entre 0.0 et 1.0.
         print("🧠 Appel à Bakeli AI pour analyse d'intention (Sentiment)...")
         reponse_texte = ask(
             messages=[{"role": "user", "content": prompt}], 
-            model="llama-3.3-70b-versatile"
+            model="openai/gpt-oss-20b"
         )
         
         # Nettoyage d'éventuels blocs markdown retournés par le LLM

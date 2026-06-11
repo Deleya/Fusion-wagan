@@ -15,11 +15,11 @@ from utils.ai_client import ask, ask_with_file
 # ------------------------------------------------------------------ #
 #  Modèles disponibles                                                 #
 # ------------------------------------------------------------------ #
-MODEL_CHAT    = "llama-3.3-70b-versatile"   # Usage général, super puissant via Groq/Bakeli
-MODEL_CODE    = "llama-3.3-70b-versatile"   # On utilise le même modèle performant pour le code
+MODEL_CHAT    = "openai/gpt-oss-20b"   # Usage général via Groq/Bakeli
+MODEL_CODE    = "openai/gpt-oss-20b"   # On utilise le même modèle performant pour le code
 MODEL_VISION  = "llava"      # Analyse d'images 👀
-MODEL_LONG    = "llama-3.3-70b-versatile"    # Raisonnement, texte long
-MODEL_MULTI   = "llama-3.3-70b-versatile"  # Multilingue
+MODEL_LONG    = "openai/gpt-oss-20b"    # Raisonnement, texte long
+MODEL_MULTI   = "openai/gpt-oss-20b"  # Multilingue
 
 
 wagan_persona = """

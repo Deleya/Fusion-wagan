@@ -14,7 +14,7 @@ from decouple import config
 # ============================================================
 
 # Modèle à utiliser (Le meilleur modèle Groq via l'API Bakeli)
-MODELE = "llama-3.3-70b-versatile"
+MODELE = "openai/gpt-oss-20b"
 
 # ============================================================
 # SYSTEM PROMPT — C'est ici qu'on définit la "personnalité" de l'agent

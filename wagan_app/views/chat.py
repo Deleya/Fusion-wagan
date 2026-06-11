@@ -80,15 +80,24 @@ class ChatAPIView(APIView):
                 "results": results,
             }, status=status.HTTP_200_OK)
 
-        # 🐙 Code review GitHub → phi3
+        # 🔗 Traitement du lien externe (GitHub ou autre)
         if github:
-            feedback = self.get_code_feedback(github)
-            return Response({
-                "message":  "Data received",
-                "user":     name,
-                "model":    MODEL_CODE,
-                "response": feedback,
-            }, status=status.HTTP_200_OK)
+            try:
+                if "github.com" in github:
+                    link_content = self.get_github_code(github)
+                else:
+                    resp = requests.get(github, timeout=10)
+                    resp.raise_for_status()
+                    try:
+                        from bs4 import BeautifulSoup
+                        soup = BeautifulSoup(resp.text, 'html.parser')
+                        link_content = soup.get_text(separator=' ', strip=True)[:15000]
+                    except ImportError:
+                        link_content = re.sub(r'<[^>]+>', ' ', resp.text)[:15000]
+            except Exception as e:
+                link_content = f"Impossible d'accéder au lien ({e})"
+            
+            message = f"{message}\n\n[Contenu extrait du lien {github}] :\n{link_content}"
 
         # 💬 Choix du modèle selon le message
         model = self.select_model(message)

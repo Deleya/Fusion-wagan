@@ -1,8 +1,8 @@
 from celery import shared_task
 from django.conf import settings
 from .nlp_utils import analyser_message_whatsapp, analyser_sentiment_global
-from .agent_brain import generer_reponse
-from .whatsapp_sender import send_whatsapp_message, envoyer_boutons_amorce
+from .agent_brain import generer_reponse, generer_amorce
+from .whatsapp_sender import send_whatsapp_message
 from .models import Message
 
 
@@ -35,14 +35,20 @@ def process_message_async(self, phone_number, message_text, message_type, messag
             print(f"⚠️  Message déjà traité: {message_id}")
             return
 
-        # 0.5. Amorce de discussion (Menu interactif)
-        mots_amorce = ['bonjour', 'salut', 'hello', 'menu', 'aide', 'coucou', 'start']
-        if message_type == 'text' and message_text.lower().strip() in mots_amorce:
-            print(f"👋 Amorce détectée, envoi du menu interactif à {phone_number}")
+        # --- Amorce IA : premier message du client avec cette conversation
+        # On détecte si c'est le tout premier échange (aucun message précédent traité)
+        premier_message = not Message.objects.filter(
+            phone_number=phone_number,
+            processed=True
+        ).exists()
+
+        if premier_message and message_type == 'text':
+            print(f"👋 Premier message détecté pour {phone_number} — génération de l'amorce IA")
+            reponse_amorce = generer_amorce(message_text, phone_number)
             try:
-                envoyer_boutons_amorce(phone_number)
+                send_whatsapp_message(phone_number, reponse_amorce)
             except Exception as e:
-                print(f"❌ Erreur envoi amorce: {e}")
+                print(f"❌ Erreur envoi amorce IA: {e}")
             
             # On met à jour la base de données comme "traité"
             try:
@@ -51,27 +57,25 @@ def process_message_async(self, phone_number, message_text, message_type, messag
                 message_obj.save()
             except:
                 pass
-            return # On s'arrête là, pas besoin de Groq pour un simple "bonjour"
+            return  # Premier message traité par l'amorce, on s'arrête là
 
-        # 1. Analyser sentiment GLOBAL (basé sur les 4 derniers messages de la conversation)
+        # 1. Analyser sentiment GLOBAL (basé sur TOUTE la conversation)
         if message_type in ['text', 'interactive']:
             try:
-                # Récupérer les 4 derniers messages texte du client (incluant le message actuel)
+                # Récupérer tous les messages texte du client pour cette conversation
                 derniers_messages = list(
                     Message.objects.filter(
                         phone_number=phone_number,
                         message_text__isnull=False
                     ).exclude(
                         message_text=''
-                    ).order_by('-timestamp')[:4].values_list('message_text', flat=True)
+                    ).order_by('timestamp').values_list('message_text', flat=True)
                 )
                 # Ajouter le message actuel s'il n'est pas encore en DB avec le bon texte
                 if message_text not in derniers_messages:
-                    derniers_messages.insert(0, message_text)
-                # Inverser pour avoir l'ordre chronologique (du plus ancien au plus récent)
-                derniers_messages = derniers_messages[::-1]
+                    derniers_messages.append(message_text)
                 
-                print(f"📊 Messages pour analyse globale ({len(derniers_messages)}): {[m[:30]+'...' if len(m)>30 else m for m in derniers_messages]}")
+                print(f"📊 Analyse globale sur {len(derniers_messages)} message(s)")
                 
                 resultat_ia = analyser_sentiment_global(derniers_messages)
                 sentiment_label = resultat_ia['label']

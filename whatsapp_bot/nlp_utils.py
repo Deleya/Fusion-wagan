@@ -20,7 +20,7 @@ Analyse cette conversation WhatsApp avec un prospect et détermine son niveau d'
 RÈGLES DE CLASSIFICATION STRICTES:
 1. "positive" : Prospect CHAUD. Très intéressé, montre des signes clairs de vouloir s'inscrire rapidement, pose des questions sur les modalités d'inscription, le paiement, ou le début des cours.
 2. "neutral" : Prospect FROID ou INCERTAIN. Pose des questions mais ne montre pas de signe d'engagement clair, ou n'a pas montré d'intérêt explicite. Nécessite une relance.
-3. "negative" : Prospect DÉINTÉRESSÉ ou DÉÇU. Ne veut plus être contacté, est fâché, n'a pas trouvé ce qu'il voulait (ex: voulait des cours du soir ou en week-end non disponibles). Nécessite une intervention humaine urgente.
+3. "negative" : Prospect TRÈS MÉCONTENT. Il y a une plainte sérieuse, de la frustration extrême, une insulte, ou une exigence forte (remboursement, litige). Ne classe pas en négatif si c'est juste un manque d'intérêt ou un simple "non". Réserve "negative" pour les cas qui nécessitent une intervention humaine URGENTE pour gérer une crise.
 
 CONVERSATION RÉCENTE DU PROSPECT:
 {conversation}
@@ -56,6 +56,10 @@ Le champ 'score' est ta confiance entre 0.0 et 1.0.
             
         score = float(data.get('score', 0.5))
         
+        # On filtre les faux positifs : un score trop bas sur un "negative" devient "neutral"
+        if label == 'negative' and score < 0.72:
+            label = 'neutral'
+            
         print(f"📊 Résultat Intention: {label} (confiance: {score})")
         return {'label': label, 'score': score}
 
@@ -64,10 +68,10 @@ Le champ 'score' est ta confiance entre 0.0 et 1.0.
         # Logique de secours basique par mots-clés au cas où l'API Groq est inaccessible
         texte_complet = " ".join(messages_textes).lower()
         
-        mots_negatifs = ['nul', 'déçu', 'jamais', 'marre', 'non', 'pas intéressé', 'soir', 'week-end', 'inutile']
+        mots_negatifs_graves = ['escroc', 'arnaque', 'rembourser', 'remboursement', 'plainte', 'incompétent', 'honte']
         mots_positifs = ['oui', 'inscription', 'payer', 'comment', 'intéressé', 'super', 'génial', 'commencer']
         
-        if any(mot in texte_complet for mot in mots_negatifs):
+        if any(mot in texte_complet for mot in mots_negatifs_graves):
             return {'label': 'negative', 'score': 0.8}
         if any(mot in texte_complet for mot in mots_positifs):
             return {'label': 'positive', 'score': 0.8}

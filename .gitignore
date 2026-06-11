@@ -1,3 +1,5 @@
 .env*
 __pycache__/
-*.pycdb.sqlite3
+
+*.pyc
+db.sqlite3

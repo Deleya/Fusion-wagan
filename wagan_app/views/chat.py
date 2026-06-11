@@ -15,11 +15,11 @@ from utils.ai_client import ask, ask_with_file
 # ------------------------------------------------------------------ #
 #  Modèles disponibles                                                 #
 # ------------------------------------------------------------------ #
-MODEL_CHAT    = "llama3.2"   # Usage général, rapide ⚡
-MODEL_CODE    = "phi3"       # Code & logique
-MODEL_VISION  = "llava"      # Analyse d'images 🖼️
-MODEL_LONG    = "mistral"    # Raisonnement, texte long
-MODEL_MULTI   = "gemma3:4b"  # Multilingue
+MODEL_CHAT    = "llama-3.3-70b-versatile"   # Usage général, super puissant via Groq/Bakeli
+MODEL_CODE    = "llama-3.3-70b-versatile"   # On utilise le même modèle performant pour le code
+MODEL_VISION  = "llava"      # Analyse d'images 👀
+MODEL_LONG    = "llama-3.3-70b-versatile"    # Raisonnement, texte long
+MODEL_MULTI   = "llama-3.3-70b-versatile"  # Multilingue
 
 
 wagan_persona = """

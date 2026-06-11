@@ -1,9 +1,7 @@
 import json
-from groq import Groq
+import re
 from decouple import config
-
-# On récupère la clé API Groq
-GROQ_API_KEY = config("GROQ_API_KEY", default="")
+from utils.ai_client import ask
 
 def analyser_sentiment_global(messages_textes):
     """
@@ -35,18 +33,22 @@ Le champ 'score' est ta confiance entre 0.0 et 1.0.
 """
 
     try:
-        client = Groq(api_key=GROQ_API_KEY)
-        
-        print("🧠 Appel à Groq pour analyse d'intention (Sentiment)...")
-        completion = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0, # 0.0 pour un résultat très déterministe et fiable
-            response_format={"type": "json_object"}
+        print("🧠 Appel à Bakeli AI pour analyse d'intention (Sentiment)...")
+        reponse_texte = ask(
+            messages=[{"role": "user", "content": prompt}], 
+            model="llama-3.3-70b-versatile"
         )
         
-        reponse_texte = completion.choices[0].message.content.strip()
-        data = json.loads(reponse_texte)
+        # Nettoyage d'éventuels blocs markdown retournés par le LLM
+        reponse_texte = reponse_texte.strip()
+        if reponse_texte.startswith("```json"):
+            reponse_texte = reponse_texte[7:]
+        if reponse_texte.startswith("```"):
+            reponse_texte = reponse_texte[3:]
+        if reponse_texte.endswith("```"):
+            reponse_texte = reponse_texte[:-3]
+            
+        data = json.loads(reponse_texte.strip())
         
         label = data.get('label', 'neutral').lower()
         if label not in ['positive', 'neutral', 'negative']:

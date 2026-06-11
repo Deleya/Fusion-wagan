@@ -6,18 +6,15 @@ et contextuelles. Le System Prompt cadre l'IA pour qu'elle reste dans
 son rôle d'assistant de service client.
 """
 
-from groq import Groq
+from utils.ai_client import ask
 from decouple import config
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-# Clé API Groq — lue depuis le fichier .env
-GROQ_API_KEY = config("GROQ_API_KEY", default="")
-
-# Modèle à utiliser (LLaMA 3.1 8B — remplace llama3-8b-8192 qui est obsolète)
-MODELE = "llama-3.1-8b-instant"
+# Modèle à utiliser (Le meilleur modèle Groq via l'API Bakeli)
+MODELE = "llama-3.3-70b-versatile"
 
 # ============================================================
 # SYSTEM PROMPT — C'est ici qu'on définit la "personnalité" de l'agent
@@ -117,8 +114,6 @@ def generer_reponse(message_utilisateur, numero_tel, sentiment=None, score=None)
         str: La réponse générée par l'IA.
     """
     try:
-        client = Groq(api_key=GROQ_API_KEY)
-
         # 1. Construire le contexte avec le sentiment
         system_enrichi = SYSTEM_PROMPT
 
@@ -150,18 +145,9 @@ def generer_reponse(message_utilisateur, numero_tel, sentiment=None, score=None)
         # 4. Ajouter le nouveau message de l'utilisateur
         messages.append({"role": "user", "content": message_utilisateur})
 
-        # 5. Appel à Groq
-        print(f"🧠 Agent Brain — Appel Groq pour {numero_tel}...")
-        completion = client.chat.completions.create(
-            model=MODELE,
-            messages=messages,
-            temperature=0.7,       # Un peu de créativité mais pas trop
-            max_tokens=300,        # Réponses courtes (WhatsApp)
-            top_p=0.9,
-            timeout=10.0,          # Sécurité: on n'attend pas plus de 10s
-        )
-
-        reponse_ia = completion.choices[0].message.content.strip()
+        # 5. Appel à l'API Bakeli
+        print(f"🧠 Agent Brain — Appel Bakeli AI pour {numero_tel}...")
+        reponse_ia = ask(messages=messages, model=MODELE)
 
         # 6. Sauvegarder dans l'historique
         ajouter_au_historique(numero_tel, "user", message_utilisateur)

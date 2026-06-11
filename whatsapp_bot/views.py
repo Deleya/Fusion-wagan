@@ -106,8 +106,6 @@ def whatsapp_webhook(request):
     try:
         data = json.loads(request.body)
         print("✅ POST REÇU AVEC SUCCÈS !")
-        print("Payload complet reçu :")
-        print(json.dumps(data, indent=2))
 
         phone_number, message_text, message_type, external_message_id = extract_message_data(data)
 
@@ -176,13 +174,33 @@ def whatsapp_webhook(request):
 
 
 def dashboard_api(request):
-    total = Message.objects.count()
-    utilisateurs = Message.objects.values('phone_number').distinct().count()
-    pending = Message.objects.filter(processed=False).count()
+    qs = Message.objects.all()
     
-    # NOUVELLE LOGIQUE : Satisfaction Globale par Utilisateur
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+    
+    from django.utils.dateparse import parse_datetime
+    if start_date:
+        parsed_start = parse_datetime(start_date)
+        if parsed_start:
+            qs = qs.filter(timestamp__gte=parsed_start)
+    if end_date:
+        parsed_end = parse_datetime(end_date)
+        if parsed_end:
+            qs = qs.filter(timestamp__lte=parsed_end)
+            
+    total = qs.count()
+    utilisateurs = qs.values('phone_number').distinct().count()
+    pending = qs.filter(processed=False).count()
+    
     users_latest_sentiment = {}
-    for msg in Message.objects.order_by('timestamp'):
+    user_messages = {}
+    
+    for msg in qs.order_by('timestamp'):
+        if msg.phone_number not in user_messages:
+            user_messages[msg.phone_number] = []
+        user_messages[msg.phone_number].append(msg)
+        
         if msg.sentiment_label:
             users_latest_sentiment[msg.phone_number] = msg.sentiment_label
             
@@ -196,6 +214,94 @@ def dashboard_api(request):
     p_negatif = round((negatifs / nb_analyses * 100), 1) if nb_analyses > 0 else 0
     p_neutre = round((neutres / nb_analyses * 100), 1) if nb_analyses > 0 else 0
     
+    # ===== ANALYSE DE CONVERSION APPROFONDIE =====
+    # Un prospect est considéré "converti" UNIQUEMENT si :
+    # 1. Son dernier sentiment est "positive" (il finit convaincu)
+    # 2. Il a au moins 2 messages analysés (pas un simple "bonjour" positif)
+    # 3. On compte TOUS les messages échangés avant d'atteindre
+    #    le premier message "positive" qui est MAINTENU jusqu'à la fin
+    #    (= pas un faux positif suivi d'un retour en neutral/negative)
+    
+    conversion_counts = []
+    nb_prospects_convertis = 0
+    
+    for phone, msgs in user_messages.items():
+        # Extraire seulement les messages qui ont un sentiment analysé
+        sentiments_timeline = []
+        for i, m in enumerate(msgs):
+            if m.sentiment_label:
+                sentiments_timeline.append({
+                    'index': i + 1,  # position dans la conversation (1-based)
+                    'label': m.sentiment_label,
+                    'score': m.sentiment_score or 0.5
+                })
+        
+        if len(sentiments_timeline) < 2:
+            continue  # Pas assez de données pour juger une conversion
+        
+        dernier_sentiment = sentiments_timeline[-1]['label']
+        
+        if dernier_sentiment != 'positive':
+            continue  # Le prospect n'a PAS fini positivement → pas converti
+        
+        # Trouver le point de bascule : le PREMIER "positive" 
+        # à partir duquel il RESTE positif jusqu'à la fin
+        point_de_bascule = None
+        for idx in range(len(sentiments_timeline)):
+            # Vérifier si à partir de cet index, tous les sentiments restants sont positifs
+            remaining = sentiments_timeline[idx:]
+            if all(s['label'] == 'positive' for s in remaining):
+                point_de_bascule = sentiments_timeline[idx]['index']
+                break
+        
+        if point_de_bascule is not None:
+            nb_prospects_convertis += 1
+            conversion_counts.append(point_de_bascule)
+    
+    avg_messages_to_convert = 0
+    if conversion_counts:
+        avg_messages_to_convert = round(sum(conversion_counts) / len(conversion_counts), 1)
+    
+    # Taux de conversion réel
+    taux_conversion = 0
+    if utilisateurs > 0:
+        taux_conversion = round((nb_prospects_convertis / utilisateurs * 100), 1)
+    
+    # Liste détaillée des prospects
+    prospects_list = []
+    for phone, msgs in user_messages.items():
+        first_contact = msgs[0].timestamp.isoformat()
+        last_contact = msgs[-1].timestamp.isoformat()
+        nb_msgs = len(msgs)
+        sentiment = users_latest_sentiment.get(phone, 'inconnu')
+        
+        # Score de confiance moyen
+        scores = [m.sentiment_score for m in msgs if m.sentiment_score is not None]
+        avg_score = round(sum(scores) / len(scores), 2) if scores else 0
+        
+        # Statut lisible
+        if sentiment == 'positive':
+            statut = 'Chaud'
+        elif sentiment == 'negative':
+            statut = 'Alerte'
+        elif sentiment == 'neutral':
+            statut = 'Froid'
+        else:
+            statut = 'En attente'
+        
+        prospects_list.append({
+            'phone': phone,
+            'nb_messages': nb_msgs,
+            'first_contact': first_contact,
+            'last_contact': last_contact,
+            'sentiment': sentiment,
+            'statut': statut,
+            'avg_score': avg_score,
+        })
+    
+    # Trier par dernier contact desc
+    prospects_list.sort(key=lambda x: x['last_contact'], reverse=True)
+    
     context = {
         'total': total,
         'utilisateurs': utilisateurs,
@@ -207,6 +313,10 @@ def dashboard_api(request):
         'p_positif': p_positif,
         'p_negatif': p_negatif,
         'p_neutre': p_neutre,
+        'avg_messages_to_convert': avg_messages_to_convert,
+        'nb_prospects_convertis': nb_prospects_convertis,
+        'taux_conversion': taux_conversion,
+        'prospects_list': prospects_list,
         'now': timezone.now().isoformat()
     }
     return JsonResponse(context)

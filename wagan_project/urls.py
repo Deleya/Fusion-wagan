@@ -16,6 +16,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path, re_path
 from utils.config import schema_view
+from wagan_app.views.google_oauth import GoogleCallbackView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -28,9 +29,12 @@ urlpatterns = [
     path('api/auth/', include('djoser.urls.jwt')),
     path('api/auth/social/', include('social_django.urls', namespace='social')),
     path('api/auth/', include('djoser.social.urls')),
+    # ✅ Callback Google backend-side (pas de cookie cross-origin requis)
+    path('api/auth/google/callback/', GoogleCallbackView.as_view(), name='google-callback'),
     path('whatsapp/', include('whatsapp_bot.urls')),
 
     # Swagger & Redoc
     re_path(r"^api/swagger/$", schema_view.with_ui("swagger", cache_timeout=0), name="schema-swagger-ui"),
     re_path(r"^api/redoc/$", schema_view.with_ui("redoc", cache_timeout=0), name="schema-redoc"),
 ]
+

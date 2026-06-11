@@ -33,7 +33,30 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 DEBUG = os.getenv("DJANGO_SECURITY")
 
 ALLOWED_HOSTS = ["*"]
-CORS_ALLOW_ALL_ORIGINS = True
+
+# CORS — autoriser le frontend à envoyer des cookies de session
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+]
+
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
+GOOGLE_REDIRECT_URI = os.getenv(
+    "GOOGLE_REDIRECT_URI",
+    "http://localhost:8000/api/auth/google/callback/",
+)
+
+# Quand CORS_ALLOW_CREDENTIALS est True, on ne peut plus utiliser CORS_ALLOW_ALL_ORIGINS=True
+# On autorise explicitement toutes les origines de la whitelist ci-dessus
+CORS_ALLOW_ALL_ORIGINS = False
+
+# Cookie de session transmissible en cross-origin (requis pour djoser.social OAuth)
+SESSION_COOKIE_SAMESITE = "None"
+SESSION_COOKIE_SECURE = False  # True en production (HTTPS)
+CSRF_COOKIE_SAMESITE = "None"
+CSRF_COOKIE_SECURE = False  # True en production (HTTPS)
 
 # Application definition
 
@@ -175,7 +198,10 @@ DJOSER = {
     'SEND_ACTIVATION_EMAIL': False,
     'PASSWORD_RESET_CONFIRM_URL': 'reset-password/{uid}/{token}',
     'SOCIAL_AUTH_TOKEN_STRATEGY': 'djoser.social.token.jwt.TokenStrategy',
-    'SOCIAL_AUTH_ALLOWED_REDIRECT_URIS': ['http://localhost:5173/auth/google'],
+    'SOCIAL_AUTH_ALLOWED_REDIRECT_URIS': [
+        'http://localhost:5173/auth/google',
+        GOOGLE_REDIRECT_URI,
+    ],
     'SERIALIZERS': {
         'user': 'wagan_app.serializers.UserSerializer',
         'current_user': 'wagan_app.serializers.UserSerializer',

@@ -14,28 +14,31 @@ def analyser_sentiment_global(messages_textes):
     # On prépare la conversation pour l'IA
     conversation = "\n".join([f"- {m}" for m in messages_textes])
 
-    prompt = f"""Tu es un expert en analyse d'intention d'achat pour un centre de formation.
-Analyse cette conversation WhatsApp avec un prospect et détermine son niveau d'intérêt.
+    prompt_system = """Tu es un expert en analyse d'intention d'achat pour un centre de formation.
+Analyse cette conversation WhatsApp avec un prospect et détermine son niveau d'intérêt actuel.
 
 RÈGLES DE CLASSIFICATION STRICTES:
-1. "positive" : Prospect CHAUD. Très intéressé, montre des signes clairs de vouloir s'inscrire rapidement, pose des questions sur les modalités d'inscription, le paiement, ou le début des cours.
-2. "neutral" : Prospect FROID ou INCERTAIN. Pose des questions mais ne montre pas de signe d'engagement clair, ou n'a pas montré d'intérêt explicite. Nécessite une relance.
-3. "negative" : Prospect TRÈS MÉCONTENT. Il y a une plainte sérieuse, de la frustration extrême, une insulte, ou une exigence forte (remboursement, litige). Ne classe pas en négatif si c'est juste un manque d'intérêt ou un simple "non". Réserve "negative" pour les cas qui nécessitent une intervention humaine URGENTE pour gérer une crise.
+1. "positive" : Prospect CHAUD. Très intéressé, pose des questions précises sur l'inscription.
+2. "neutral" : Prospect FROID ou INCERTAIN. Pose des questions générales ou donne des réponses courtes sans engagement.
+3. "negative" : Prospect TRÈS MÉCONTENT. Plainte sérieuse, insulte, ou exigence forte (remboursement, litige). Ne classe pas en négatif si c'est juste un manque d'intérêt, un simple "non" ou une hésitation. Réserve "negative" pour gérer une crise.
 
-CONVERSATION RÉCENTE DU PROSPECT:
-{conversation}
+Réponds UNIQUEMENT au format JSON avec cette structure exacte :
+{"label": "positive", "score": 0.95}
 
-Réponds UNIQUEMENT au format JSON avec cette structure exacte (sans aucun autre texte autour, sans markdown) :
-{{"label": "positive", "score": 0.95}}
-
-Le champ 'label' doit être EXACTEMENT l'un de ces trois mots : "positive", "neutral", ou "negative".
+Le champ 'label' doit être "positive", "neutral", ou "negative".
 Le champ 'score' est ta confiance entre 0.0 et 1.0.
 """
+
+    prompt_user = f"""CONVERSATION RÉCENTE DU PROSPECT:
+{conversation}"""
 
     try:
         print("🧠 Appel à Bakeli AI pour analyse d'intention (Sentiment)...")
         reponse_texte = ask(
-            messages=[{"role": "user", "content": prompt}], 
+            messages=[
+                {"role": "system", "content": prompt_system},
+                {"role": "user", "content": prompt_user}
+            ], 
             model="openai/gpt-oss-20b"
         )
         
@@ -65,8 +68,8 @@ Le champ 'score' est ta confiance entre 0.0 et 1.0.
 
     except Exception as e:
         print(f"❌ Erreur Groq IA Sentiment: {e}")
-        # Logique de secours basique par mots-clés au cas où l'API Groq est inaccessible
-        texte_complet = " ".join(messages_textes).lower()
+        # Logique de secours basique par mots-clés sur le DERNIER message uniquement
+        texte_complet = messages_textes[-1].lower() if messages_textes else ""
         
         mots_negatifs_graves = ['escroc', 'arnaque', 'rembourser', 'remboursement', 'plainte', 'incompétent', 'honte']
         mots_positifs = ['oui', 'inscription', 'payer', 'comment', 'intéressé', 'super', 'génial', 'commencer']

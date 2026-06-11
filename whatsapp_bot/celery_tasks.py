@@ -26,14 +26,18 @@ def process_message_async(self, phone_number, message_text, message_type, messag
 
         print(f"🔄 Traitement async commencé: {phone_number}")
 
-        # 0. Vérifier si le message a déjà été traité
+        # 0. Vérifier si le message a déjà été traité (Concurrence / Retry Meta)
         message_obj = Message.objects.filter(id=message_id).first()
         if not message_obj:
             print(f"❌ Message introuvable au moment du traitement: {message_id}")
             return
         if message_obj.processed:
-            print(f"⚠️  Message déjà traité: {message_id}")
+            print(f"⚠️  Message déjà traité (ignorer doublon): {message_id}")
             return
+            
+        # Verrouillage immédiat pour éviter les doublons de webhook
+        message_obj.processed = True
+        message_obj.save()
 
         # --- Amorce IA : premier message du client avec cette conversation
         # On détecte si c'est le tout premier échange (aucun message précédent traité)
@@ -49,33 +53,30 @@ def process_message_async(self, phone_number, message_text, message_type, messag
                 send_whatsapp_message(phone_number, reponse_amorce)
             except Exception as e:
                 print(f"❌ Erreur envoi amorce IA: {e}")
-            
-            # On met à jour la base de données comme "traité"
-            try:
-                message_obj = Message.objects.get(id=message_id)
-                message_obj.processed = True
-                message_obj.save()
-            except:
-                pass
+            # L'amorce étant le point de sortie, le message reste 'processed'
             return  # Premier message traité par l'amorce, on s'arrête là
 
-        # 1. Analyser sentiment GLOBAL (basé sur TOUTE la conversation)
+        # 1. Analyser sentiment GLOBAL (basé sur les 4 DERNIERS messages de la conversation)
         if message_type in ['text', 'interactive']:
             try:
-                # Récupérer tous les messages texte du client pour cette conversation
+                # Récupérer les 4 derniers messages texte du client pour cette conversation
                 derniers_messages = list(
                     Message.objects.filter(
                         phone_number=phone_number,
                         message_text__isnull=False
                     ).exclude(
                         message_text=''
-                    ).order_by('timestamp').values_list('message_text', flat=True)
+                    ).order_by('-timestamp')[:4].values_list('message_text', flat=True)
                 )
-                # Ajouter le message actuel s'il n'est pas encore en DB avec le bon texte
-                if message_text not in derniers_messages:
-                    derniers_messages.append(message_text)
                 
-                print(f"📊 Analyse globale sur {len(derniers_messages)} message(s)")
+                # Le message actuel (s'il n'est pas encore dans la liste) doit être en première position (le plus récent)
+                if message_text not in derniers_messages:
+                    derniers_messages.insert(0, message_text)
+                    
+                # Inverser pour l'ordre chronologique à envoyer au LLM
+                derniers_messages = derniers_messages[::-1]
+                
+                print(f"📊 Analyse sentiment sur les {len(derniers_messages)} dernier(s) message(s)")
                 
                 resultat_ia = analyser_sentiment_global(derniers_messages)
                 sentiment_label = resultat_ia['label']
@@ -116,15 +117,13 @@ def process_message_async(self, phone_number, message_text, message_type, messag
             except Exception as e:
                 print(f"❌ Impossible de planifier la tâche d'alerte: {e}")
 
-        # 4. Mettre à jour le message en DB
+        # 4. Mettre à jour le message en DB avec son sentiment
         try:
-            message_obj = Message.objects.get(id=message_id)
             message_obj.sentiment_label = sentiment_label
             message_obj.sentiment_score = sentiment_score
-            message_obj.processed = True
             message_obj.save()
         except Exception as e:
-            print(f"❌ Erreur lors de la sauvegarde en DB: {e}")
+            print(f"❌ Erreur lors de la mise à jour sentiment DB: {e}")
 
         print(f"✅ Message traité avec succès: {phone_number}")
 

@@ -64,15 +64,15 @@ def envoyer_boutons_amorce(phone_number):
                 "buttons": [
                     {
                         "type": "reply",
-                        "reply": {"id": "btn_formations", "title": "Nos Formations 📚"}
+                        "reply": {"id": "btn_former", "title": "🚀 Je veux me former"}
                     },
                     {
                         "type": "reply",
-                        "reply": {"id": "btn_expert", "title": "Parler à un expert 👤"}
+                        "reply": {"id": "btn_question", "title": "❓ J'ai une question"}
                     },
                     {
                         "type": "reply",
-                        "reply": {"id": "btn_ia", "title": "Infos sur l'IA 🤖"}
+                        "reply": {"id": "btn_rappel", "title": "📞 Être rappelé(e)"}
                     }
                 ]
             }

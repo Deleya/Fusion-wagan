@@ -39,12 +39,26 @@ def process_message_async(self, phone_number, message_text, message_type, messag
         message_obj.processed = True
         message_obj.save()
 
-        # --- Amorce IA : premier message du client avec cette conversation
-        # On détecte si c'est le tout premier échange (aucun message précédent traité)
-        premier_message = not Message.objects.filter(
+        # --- Commande de test pour le développeur ---
+        if message_type == 'text' and message_text.strip().lower() == 'reset':
+            Message.objects.filter(phone_number=phone_number).delete()
+            send_whatsapp_message(phone_number, "🔄 Session réinitialisée. Vous pouvez envoyer un message pour tester l'amorce depuis zéro.")
+            return
+
+        # --- Amorce IA : premier message ou nouvelle session (après 12h d'inactivité)
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        dernier_message = Message.objects.filter(
             phone_number=phone_number,
             processed=True
-        ).exists()
+        ).order_by('-timestamp').first()
+
+        premier_message = False
+        if not dernier_message:
+            premier_message = True
+        elif (timezone.now() - dernier_message.timestamp) > timedelta(hours=12):
+            premier_message = True
 
         if premier_message and message_type == 'text':
             print(f"👋 Premier message détecté pour {phone_number} — génération de l'amorce IA")

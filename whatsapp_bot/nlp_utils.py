@@ -14,13 +14,15 @@ def analyser_sentiment_global(messages_textes):
     # On prépare la conversation pour l'IA
     conversation = "\n".join([f"- {m}" for m in messages_textes])
 
-    prompt_system = """Tu es un expert en analyse d'intention d'achat pour un centre de formation (Bakeli).
-Analyse cette conversation WhatsApp avec un prospect et détermine son niveau d'intérêt actuel.
+    prompt_system = """Tu es un expert en qualification de leads pour le centre de formation Bakeli.
+Ta mission est d'analyser cette conversation WhatsApp et de déterminer le statut du prospect BASÉ UNIQUEMENT SUR SON TOUT DERNIER MESSAGE.
 
-RÈGLES DE CLASSIFICATION STRICTES :
-1. "positive" : Prospect CHAUD. Très intéressé, veut s'inscrire, est prêt à démarrer ou demande les modalités de paiement. Il passe à l'action.
-2. "neutral" : Prospect FROID ou EN DÉCOUVERTE. Pose des questions générales, se renseigne, donne des réponses courtes, mais n'a pas encore pris de décision ferme.
-3. "negative" : Prospect MÉCONTENT ou PERDU (DÉSINTÉRÊT). Plainte sérieuse, insulte, ou le prospect exprime clairement qu'il abandonne car il ne trouve pas ce qui lui convient (ex: "ça ne m'intéresse plus", "pas de cours le week-end", "trop cher"). Déclenche une alerte humaine.
+RÈGLES MÉTIER DE CLASSIFICATION :
+1. "positive" (PROSPECT CHAUD / CONVERTION) : Le prospect exprime une intention claire de s'inscrire, demande comment payer, ou confirme son choix de formation.
+2. "neutral" (DÉCOUVERTE / FROID) : Le prospect dit bonjour, pose des questions, ou cherche des infos. C'est l'état normal d'une discussion.
+3. "negative" (ALERTE HUMAINE / PERDU) : Le prospect exprime une plainte forte, OU un désintérêt définitif (ex: "ça ne m'intéresse plus", "les horaires ne conviennent pas").
+
+RÈGLE D'OR : L'historique n'est là que pour le contexte. Le label final DOIT refléter l'intention du DERNIER message. Si le dernier message est "Bonjour", le statut est "neutral", même s'il était mécontent hier.
 
 Réponds UNIQUEMENT au format JSON avec cette structure exacte :
 {"label": "positive", "score": 0.95}

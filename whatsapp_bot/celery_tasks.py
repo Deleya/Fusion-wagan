@@ -49,15 +49,15 @@ def process_message_async(self, phone_number, message_text, message_type, messag
         from django.utils import timezone
         from datetime import timedelta
         
-        dernier_message = Message.objects.filter(
+        dernier_message_avant = Message.objects.filter(
             phone_number=phone_number,
             processed=True
-        ).order_by('-timestamp').first()
+        ).exclude(id=message_id).order_by('-timestamp').first()
 
         premier_message = False
-        if not dernier_message:
+        if not dernier_message_avant:
             premier_message = True
-        elif (timezone.now() - dernier_message.timestamp) > timedelta(hours=12):
+        elif (timezone.now() - dernier_message_avant.timestamp) > timedelta(hours=12):
             premier_message = True
 
         if premier_message and message_type == 'text':
@@ -102,7 +102,7 @@ def process_message_async(self, phone_number, message_text, message_type, messag
                 sentiment_score = 0.5
 
         # 2. Générer réponse IA
-        reponse_ia = generer_reponse(
+        reponse_ia, is_panne = generer_reponse(
             message_utilisateur=message_text,
             numero_tel=phone_number,
             sentiment=sentiment_label,
@@ -119,13 +119,26 @@ def process_message_async(self, phone_number, message_text, message_type, messag
                 print(f"❌ Impossible d'envoyer le WhatsApp final: {e}")
 
         # 3.5. Déclenchement de la tâche d'alerte asynchrone découplée
-        if sentiment_label == 'negative':
+        if is_panne:
+            try:
+                send_admin_alerts_async.delay(
+                    phone_number=phone_number,
+                    message_text=message_text,
+                    sentiment_score=0.0,
+                    derniers_messages=None,
+                    is_panne=True
+                )
+                print(f"🚨 Tâche d'alerte PANNE IA planifiée pour le numéro {phone_number}")
+            except Exception as e:
+                print(f"❌ Impossible de planifier la tâche d'alerte panne: {e}")
+        elif sentiment_label == 'negative':
             try:
                 send_admin_alerts_async.delay(
                     phone_number=phone_number,
                     message_text=message_text,
                     sentiment_score=float(sentiment_score) if sentiment_score is not None else 0.5,
-                    derniers_messages=derniers_messages
+                    derniers_messages=derniers_messages,
+                    is_panne=False
                 )
                 print(f"🚨 Tâche d'alerte asynchrone planifiée pour le client mécontent {phone_number}")
             except Exception as e:
@@ -160,18 +173,21 @@ def process_message_async(self, phone_number, message_text, message_type, messag
 
 
 @shared_task(bind=True, max_retries=3, acks_late=True)
-def send_admin_alerts_async(self, phone_number, message_text, sentiment_score, derniers_messages=None):
+def send_admin_alerts_async(self, phone_number, message_text, sentiment_score, derniers_messages=None, is_panne=False):
     """
     Tâche Celery pour envoyer les alertes sur WhatsApp et Discord de manière isolée et résiliente.
     """
-    print(f"🚨 Début d'envoi des alertes pour {phone_number}...")
+    print(f"🚨 Début d'envoi des alertes pour {phone_number} (Panne={is_panne})...")
     whatsapp_error = None
     discord_error = None
 
     # 1. Envoi Alerte WhatsApp
     try:
         from .whatsapp_service import envoyer_alerte_whatsapp
-        message_alerte = f"⚠️ *ALERTE CLIENT MÉCONTENT*\nNuméro: {phone_number}\nMessage: {message_text}"
+        if is_panne:
+            message_alerte = f"⚠️ *ALERTE PANNE IA*\nL'API Groq est injoignable.\nLe bot a utilisé le message de secours pour le numéro: {phone_number}\nMessage client: {message_text}"
+        else:
+            message_alerte = f"⚠️ *ALERTE CLIENT MÉCONTENT*\nNuméro: {phone_number}\nMessage: {message_text}"
         envoyer_alerte_whatsapp(message_alerte, settings.WHATSAPP_ADMIN_NUMBER)
         print(f"✅ Alerte WhatsApp envoyée avec succès à {settings.WHATSAPP_ADMIN_NUMBER}")
     except Exception as e:
@@ -181,12 +197,22 @@ def send_admin_alerts_async(self, phone_number, message_text, sentiment_score, d
     # 2. Envoi Alerte Discord
     try:
         from .alerts import envoyer_alerte_discord
-        envoyer_alerte_discord(
-            phone_number=phone_number,
-            message_text=message_text,
-            sentiment_score=sentiment_score,
-            derniers_messages=derniers_messages
-        )
+        if not is_panne:
+            envoyer_alerte_discord(
+                phone_number=phone_number,
+                message_text=message_text,
+                sentiment_score=sentiment_score,
+                derniers_messages=derniers_messages
+            )
+        else:
+            # On pourrait avoir une alerte Discord spécifique pour la panne, on l'omet ou on l'envoie avec un titre différent.
+            # Pour l'instant on utilise la même fonction mais on pourrait l'adapter dans alerts.py
+            envoyer_alerte_discord(
+                phone_number=phone_number,
+                message_text=f"PANNE IA: {message_text}",
+                sentiment_score=0.0,
+                derniers_messages=["L'API IA EST EN PANNE !"]
+            )
     except Exception as e:
         print(f"❌ Échec de l'alerte Discord: {e}")
         discord_error = e

@@ -14,13 +14,13 @@ def analyser_sentiment_global(messages_textes):
     # On prépare la conversation pour l'IA
     conversation = "\n".join([f"- {m}" for m in messages_textes])
 
-    prompt_system = """Tu es un expert en analyse d'intention d'achat pour un centre de formation.
+    prompt_system = """Tu es un expert en analyse d'intention d'achat pour un centre de formation (Bakeli).
 Analyse cette conversation WhatsApp avec un prospect et détermine son niveau d'intérêt actuel.
 
-RÈGLES DE CLASSIFICATION STRICTES:
-1. "positive" : Prospect CHAUD. Très intéressé, pose des questions précises sur l'inscription.
-2. "neutral" : Prospect FROID ou INCERTAIN. Pose des questions générales ou donne des réponses courtes sans engagement.
-3. "negative" : Prospect TRÈS MÉCONTENT. Plainte sérieuse, insulte, ou exigence forte (remboursement, litige). Ne classe pas en négatif si c'est juste un manque d'intérêt, un simple "non" ou une hésitation. Réserve "negative" pour gérer une crise.
+RÈGLES DE CLASSIFICATION STRICTES :
+1. "positive" : Prospect CHAUD. Très intéressé, veut s'inscrire, est prêt à démarrer ou demande les modalités de paiement. Il passe à l'action.
+2. "neutral" : Prospect FROID ou EN DÉCOUVERTE. Pose des questions générales, se renseigne, donne des réponses courtes, mais n'a pas encore pris de décision ferme.
+3. "negative" : Prospect MÉCONTENT ou PERDU (DÉSINTÉRÊT). Plainte sérieuse, insulte, ou le prospect exprime clairement qu'il abandonne car il ne trouve pas ce qui lui convient (ex: "ça ne m'intéresse plus", "pas de cours le week-end", "trop cher"). Déclenche une alerte humaine.
 
 Réponds UNIQUEMENT au format JSON avec cette structure exacte :
 {"label": "positive", "score": 0.95}
@@ -71,8 +71,8 @@ Le champ 'score' est ta confiance entre 0.0 et 1.0.
         # Logique de secours basique par mots-clés sur le DERNIER message uniquement
         texte_complet = messages_textes[-1].lower() if messages_textes else ""
         
-        mots_negatifs_graves = ['escroc', 'arnaque', 'rembourser', 'remboursement', 'plainte', 'incompétent', 'honte']
-        mots_positifs = ['oui', 'inscription', 'payer', 'comment', 'intéressé', 'super', 'génial', 'commencer']
+        mots_negatifs_graves = ['escroc', 'arnaque', 'rembourser', 'remboursement', 'plainte', 'incompétent', 'honte', 'intéresse plus', 'pas satisfait', 'laisse tomber', 'plus intéressé', 'au revoir']
+        mots_positifs = ['oui', 'inscription', 'payer', 'comment', 'intéressé', 'super', 'génial', 'commencer', 'je veux le faire', 'prix']
         
         if any(mot in texte_complet for mot in mots_negatifs_graves):
             return {'label': 'negative', 'score': 0.8}

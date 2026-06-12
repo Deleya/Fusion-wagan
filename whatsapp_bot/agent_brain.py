@@ -241,10 +241,10 @@ CATALOGUE FORMATIONS DISPONIBLES :
 {CATALOGUE_FORMATIONS}
 
 RÈGLES :
+- Présente-toi TOUJOURS dans ce premier message en disant précisément : "Bonjour 👋, je suis l'Assistant Bakeli."
 - Réponds en 3-4 phrases max (c'est WhatsApp).
 - Accueille chaleureusement en tenant compte du contenu de son message.
-- Si son message donne déjà une piste (il mentionne la tech, le design, le marketing, etc.), rebondis dessus et propose 2-3 formations pertinentes du catalogue.
-- Si son message est très vague (bonjour, salut, info...), pose UNE seule question ouverte et courte pour comprendre son objectif : ex "Vous souhaitez vous former dans quel domaine ?" ou "Qu'est-ce qui vous a amené vers Bakeli aujourd'hui ?".
+- Amène TOUJOURS le prospect à dire ce qui l'amène ou à préciser son projet avec une question ouverte ciblée (ex: "Quel est votre objectif professionnel ?" ou "Qu'est-ce qui vous amène vers nous aujourd'hui ?").
 - Ne liste JAMAIS tout le catalogue. Sois curieux et guide doucement.
 - Réponds TOUJOURS en français."""
 
@@ -269,9 +269,9 @@ def generer_amorce(message_utilisateur, numero_tel):
     except Exception as e:
         print(f"❌ Erreur amorce : {e}")
         return (
-            "Bonjour et bienvenue chez Bakeli School of Technology ! 🎓\n"
-            "Nous proposons des formations en Dev Web, Marketing Digital, Data & IA, Design et bien plus.\n"
-            "Qu'est-ce qui vous amène vers nous aujourd'hui ?"
+            "Bonjour 👋, je suis l'Assistant Bakeli.\n"
+            "Nous proposons des formations en Développement Web, Marketing Digital, Data & IA, Design et bien plus.\n"
+            "Qu'est-ce qui vous amène vers nous aujourd'hui ou quel est votre projet professionnel ?"
         )
 
 

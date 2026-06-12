@@ -61,12 +61,12 @@ def process_message_async(self, phone_number, message_text, message_type, messag
             premier_message = True
 
         if premier_message and message_type == 'text':
-            print(f"👋 Premier message détecté pour {phone_number} — génération de l'amorce IA")
-            reponse_amorce = generer_amorce(message_text, phone_number)
+            print(f"👋 Premier message détecté pour {phone_number} — envoi des boutons d'amorce")
             try:
-                send_whatsapp_message(phone_number, reponse_amorce)
+                from .whatsapp_sender import envoyer_boutons_amorce
+                envoyer_boutons_amorce(phone_number)
             except Exception as e:
-                print(f"❌ Erreur envoi amorce IA: {e}")
+                print(f"❌ Erreur envoi boutons amorce: {e}")
             # L'amorce étant le point de sortie, le message reste 'processed'
             return  # Premier message traité par l'amorce, on s'arrête là
 

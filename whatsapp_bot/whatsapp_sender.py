@@ -43,7 +43,7 @@ def envoyer_boutons_amorce(phone_number):
     """
     Envoie un menu interactif avec 3 boutons pour guider l'utilisateur.
     """
-    url = f"https://graph.facebook.com/v18.0/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/{VERSION}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
     
     headers = {
         "Authorization": f"Bearer {settings.WHATSAPP_TOKEN}",
@@ -58,7 +58,7 @@ def envoyer_boutons_amorce(phone_number):
         "interactive": {
             "type": "button",
             "body": {
-                "text": "Bienvenue chez WORK.BAKETLI.TECH ! ✨\nComment puis-je vous accompagner aujourd'hui ?"
+                "text": "Bienvenue chez WORK.BAKELI.TECH ! ✨\nJe suis l'Assistant Bakeli 👋\nComment puis-je vous accompagner aujourd'hui ?"
             },
             "action": {
                 "buttons": [

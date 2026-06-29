@@ -9,6 +9,9 @@ son rôle d'assistant de service client.
 from utils.ai_client import ask
 from decouple import config
 
+# Numéro de contact officiel Bakeli (configurable via .env)
+CONTACT_PHONE_NUMBER = config('CONTACT_PHONE_NUMBER', default='+221 78 301 38 38')
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -16,14 +19,11 @@ from decouple import config
 # Modèle à utiliser (Le meilleur modèle Groq via l'API Bakeli)
 MODELE = "openai/gpt-oss-20b"
 
-# Numéro de contact public de Bakeli
-NUMERO_CONTACT = config('CONTACT_PHONE_NUMBER', default='+221 78 301 38 38')
-
 # ============================================================
 # CATALOGUE FORMATIONS BAKELI (source : bakeli.tech)
 # ============================================================
 
-CATALOGUE_FORMATIONS = f"""
+CATALOGUE_FORMATIONS = """
 === CATALOGUE DES FORMATIONS BAKELI ===
 
 PROGRAMMES DISPONIBLES :
@@ -88,7 +88,7 @@ TYPES DE FORMATION :
 
 INSCRIPTION & CONTACT :
 - Inscription : bakeli.tech/inscription
-- Conseiller WhatsApp Bakeli : {NUMERO_CONTACT}
+- Conseiller WhatsApp Bakeli : {CONTACT_PHONE_NUMBER}
 - Site : bakeli.tech
 """
 
@@ -115,7 +115,7 @@ Ton nom est "Assistant Bakeli". Tu es poli, professionnel et empathique.
 4. Tu réponds TOUJOURS en français.
 5. Tes réponses sont COURTES (3 à 5 phrases max) car c'est du WhatsApp.
 6. Tu utilises des emojis avec modération.
-7. Tu ne donnes JAMAIS de numéro de téléphone inventé. Le seul vrai contact est : {NUMERO_CONTACT}.
+7. Tu ne donnes JAMAIS de numéro de téléphone inventé. Le seul vrai contact est : {CONTACT_PHONE_NUMBER}.
 
 💡 LOGIQUE DE CONVERSATION :
 - Commence TOUJOURS par comprendre le profil du client ("Qu'est-ce que vous aimeriez faire ?", "Vous avez déjà des compétences dans quoi ?").
@@ -228,11 +228,11 @@ def generer_reponse(message_utilisateur, numero_tel, sentiment=None, score=None)
 
         # RÉPONSE DE SECOURS (Le Fallback)
         fallbacks = {
-            "negative": f"Je suis sincèrement désolé, je rencontre une petite difficulté technique. Un conseiller Bakeli sera disponible au {NUMERO_CONTACT}.",
-            "positive": f"Merci pour votre enthousiasme ! Je rencontre un petit souci technique, mais notre équipe reste disponible au {NUMERO_CONTACT}.",
-            "neutral": f"Merci pour votre message. Je rencontre une maintenance temporaire. N'hésitez pas à contacter Bakeli au {NUMERO_CONTACT} ou via bakeli.tech."
+            "negative": f"Je suis sincèrement désolé, je rencontre une petite difficulté technique. Un conseiller Bakeli sera disponible au {CONTACT_PHONE_NUMBER}.",
+            "positive": f"Merci pour votre enthousiasme ! Je rencontre un petit souci technique, mais notre équipe reste disponible au {CONTACT_PHONE_NUMBER}.",
+            "neutral": f"Merci pour votre message. Je rencontre une maintenance temporaire. N'hésitez pas à contacter Bakeli au {CONTACT_PHONE_NUMBER} ou via bakeli.tech."
         }
-        fallback_msg = fallbacks.get(sentiment, f"Merci de votre patience, notre assistant IA est en maintenance. Contactez Bakeli au {NUMERO_CONTACT} !")
+        fallback_msg = fallbacks.get(sentiment, f"Merci de votre patience, notre assistant IA est en maintenance. Contactez Bakeli au {CONTACT_PHONE_NUMBER} !")
         return fallback_msg, True
 
 # ============================================================
@@ -278,6 +278,5 @@ def generer_amorce(message_utilisateur, numero_tel):
             "Nous proposons des formations en Développement Web, Marketing Digital, Data & IA, Design et bien plus.\n"
             "Qu'est-ce qui vous amène vers nous aujourd'hui ou quel est votre projet professionnel ?"
         )
-
 
 

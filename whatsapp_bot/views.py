@@ -4,7 +4,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 import json
 from django.conf import settings
-from .models import Message
+from .models import Message, BotKnowledge
 from .celery_tasks import process_message_async
 from django.utils import timezone
 
@@ -320,3 +320,62 @@ def dashboard_api(request):
         'now': timezone.now().isoformat()
     }
     return JsonResponse(context)
+
+
+# ============================================================
+# API CONFIGURATION DU BOT (Base de Connaissances Dynamique)
+# ============================================================
+
+@csrf_exempt
+@require_http_methods(["GET", "PUT"])
+def bot_config_api(request):
+    """
+    GET  /whatsapp/config/ — Retourne la configuration actuelle du bot.
+    PUT  /whatsapp/config/ — Met à jour la configuration du bot.
+
+    Utilisé par l'onglet 'Configuration' du Dashboard React.
+    Le pattern Singleton BotKnowledge.get_solo() garantit
+    qu'il n'y a jamais plus d'un enregistrement en base.
+    """
+    config = BotKnowledge.get_solo()
+
+    if request.method == "GET":
+        return JsonResponse({
+            'etablissement_nom': config.etablissement_nom,
+            'etablissement_description': config.etablissement_description,
+            'etablissement_site': config.etablissement_site,
+            'etablissement_inscription': config.etablissement_inscription,
+            'catalogue_formations': config.catalogue_formations,
+            'horaires': config.horaires,
+            'updated_at': config.updated_at.isoformat(),
+        })
+
+    # PUT — Mise à jour de la configuration
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({'error': 'JSON invalide.'}, status=400)
+
+    # Champs autorisés à être modifiés (whitelist de sécurité)
+    champs_autorises = [
+        'etablissement_nom',
+        'etablissement_description',
+        'etablissement_site',
+        'etablissement_inscription',
+        'catalogue_formations',
+        'horaires',
+    ]
+
+    for champ in champs_autorises:
+        if champ in data:
+            setattr(config, champ, data[champ])
+
+    config.save()
+
+    print(f"✅ BotKnowledge mis à jour par l'admin à {timezone.now()}")
+
+    return JsonResponse({
+        'success': True,
+        'message': 'Configuration du bot mise à jour avec succès.',
+        'updated_at': config.updated_at.isoformat(),
+    })

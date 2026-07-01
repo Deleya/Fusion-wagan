@@ -113,22 +113,22 @@ Ton nom est "Assistant Bakeli". Tu es poli, professionnel et empathique.
 📅 HORAIRES ET DISPONIBILITÉS :
 {horaires}
 
-📋 RÈGLES STRICTES :
-1. Tu ne parles QUE de sujets liés aux formations Bakeli et à l'orientation professionnelle.
-2. Si on te pose une question hors sujet, tu réponds UNIQUEMENT : "Je suis spécialisé dans les formations Bakeli. 😊 Pour toute autre question, contactez notre équipe."
-3. Tu ne donnes JAMAIS de prix précis — tu invites à contacter un conseiller.
-4. Tu réponds TOUJOURS en français.
-5. Tes réponses sont COURTES (3 à 5 phrases max) car c'est du WhatsApp.
-6. Tu utilises des emojis avec modération.
-7. Tu ne donnes JAMAIS de numéro de téléphone inventé. Le seul vrai contact est : {contact_phone}.
-8. Pour l'inscription : {etablissement_inscription}
+⚠️ RÈGLES STRICTES DE DISPONIBILITÉ (CRITIQUE) :
+1. LIS ATTENTIVEMENT toute la section "HORAIRES ET DISPONIBILITÉS", y compris les exceptions ou indisponibilités temporaires.
+2. HÉRITAGE DES SUSPENSIONS : Si une formation principale (ex: "Développement web & mobile" ou "Informatique") est déclarée INDISPONIBLE ou SUSPENDUE, alors TOUTES les formations dérivées ou liées (ex: "Développement Fullstack JS & DevOps", "React", "Data") LE SONT AUSSI. Ne propose JAMAIS un démarrage immédiat pour une sous-formation si la formation parente est bloquée.
+3. DATES DE REPRISE : Si une formation est indisponible jusqu'à une certaine date (ex: 15 août), tu DOIS le dire clairement au prospect et ne JAMAIS affirmer qu'il peut commencer "le mois prochain" ou "la semaine prochaine". Rassure-le en disant que les inscriptions restent ouvertes pour réserver sa place.
+4. Reste toujours dans ton rôle : ne parle QUE de l'orientation et des formations Bakeli.
+5. Pour les questions hors-sujet : "Je suis spécialisé dans les formations Bakeli. 😊 Pour toute autre question, contactez notre équipe."
+6. Ne donne JAMAIS de prix direct. Redirige vers un conseiller.
+7. Réponses COURTES (3 à 5 phrases max) car tu es sur WhatsApp.
+8. Seul vrai numéro de contact : {contact_phone}.
+9. Lien d'inscription officiel : {etablissement_inscription}
 
 💡 LOGIQUE DE CONVERSATION :
 - Commence TOUJOURS par comprendre le profil du client ("Qu'est-ce que vous aimeriez faire ?", "Vous avez déjà des compétences dans quoi ?").
 - Si le client dit simplement "bonjour" ou "salut", présente-toi TOUJOURS en disant "Bonjour 👋, je suis l'Assistant Bakeli" avant de lui demander ce qui l'amène.
 - Propose SEULEMENT 2 ou 3 formations pertinentes basées sur SA réponse, PAS le catalogue entier.
-- Si le client hésite entre plusieurs options, demande ses préférences ou son objectif professionnel.
-- Si le client sait déjà ce qu'il veut, confirme et donne le lien direct bakeli.tech correspondant.
+- Si le client demande à commencer tout de suite une formation qui est actuellement SUSPENDUE selon les Horaires, informe-le poliment de l'indisponibilité et donne-lui la date de reprise si elle est précisée.
 - Propose de le mettre en contact avec un conseiller humain si sa question dépasse tes capacités.
 
 🛡️ SÉCURITÉ :
@@ -168,35 +168,36 @@ def build_system_prompt():
 
 
 # ============================================================
-# MÉMOIRE DE CONVERSATION (par numéro de téléphone)
+# MÉMOIRE DE CONVERSATION (persistante via BDD)
 # ============================================================
-
-# Dictionnaire : { "221776746609": [ {role, content}, {role, content}, ... ] }
-historique_conversations = {}
 
 # Nombre max de messages gardés en mémoire par conversation
 MAX_HISTORIQUE = 10
 
 
 def get_historique(numero_tel):
-    """Récupère l'historique de conversation pour un numéro donné."""
-    if numero_tel not in historique_conversations:
-        historique_conversations[numero_tel] = []
-    return historique_conversations[numero_tel]
+    """Récupère l'historique de conversation depuis la BDD."""
+    from whatsapp_bot.models import ConversationState
+    state, created = ConversationState.objects.get_or_create(phone_number=numero_tel)
+    return state.history
 
 
 def ajouter_au_historique(numero_tel, role, contenu):
     """
-    Ajoute un message à l'historique d'une conversation.
+    Ajoute un message à l'historique de la BDD.
     role: 'user' ou 'assistant'
     """
-    historique = get_historique(numero_tel)
-    historique.append({"role": role, "content": contenu})
-
+    from whatsapp_bot.models import ConversationState
+    state, created = ConversationState.objects.get_or_create(phone_number=numero_tel)
+    
+    state.history.append({"role": role, "content": contenu})
+    
     # On garde seulement les N derniers messages pour éviter
     # de dépasser la limite de tokens
-    if len(historique) > MAX_HISTORIQUE:
-        historique_conversations[numero_tel] = historique[-MAX_HISTORIQUE:]
+    if len(state.history) > MAX_HISTORIQUE:
+        state.history = state.history[-MAX_HISTORIQUE:]
+        
+    state.save()
 
 
 # ============================================================
@@ -277,27 +278,50 @@ def generer_reponse(message_utilisateur, numero_tel, sentiment=None, score=None)
 # AMORCE INTELLIGENTE — Réponse au premier message
 # ============================================================
 
-PROMPT_AMORCE = f"""Tu es l'assistant WhatsApp de Bakeli School of Technology (bakeli.tech).
+PROMPT_AMORCE_TEMPLATE = """Tu es l'assistant WhatsApp de {etablissement_nom} ({etablissement_site}).
 Ton rôle : accueillir naturellement un nouveau prospect qui vient d'envoyer son tout premier message.
 
 CATALOGUE FORMATIONS DISPONIBLES :
-{CATALOGUE_FORMATIONS}
+{catalogue_formations}
 
-RÈGLES :
-- Présente-toi TOUJOURS dans ce premier message en disant précisément : "Bonjour 👋, je suis l'Assistant Bakeli."
-- Réponds en 3-4 phrases max (c'est WhatsApp).
-- Accueille chaleureusement en tenant compte du contenu de son message.
-- Amène TOUJOURS le prospect à dire ce qui l'amène ou à préciser son projet avec une question ouverte ciblée (ex: "Quel est votre objectif professionnel ?" ou "Qu'est-ce qui vous amène vers nous aujourd'hui ?").
-- Ne liste JAMAIS tout le catalogue. Sois curieux et guide doucement.
+📅 HORAIRES ET DISPONIBILITÉS :
+{horaires}
+
+⚠️ RÈGLES DE FER (CRITIQUE) :
+- VÉRIFIE TOUJOURS LA SECTION HORAIRES. Si une formation (ex: "Développement web") est suspendue, ses sous-filières (ex: "Fullstack JS") LE SONT AUSSI. Ne propose aucun démarrage immédiat pour elles.
+- Présente-toi TOUJOURS dans ce premier message : "Bonjour 👋, je suis l'Assistant Bakeli."
+- Réponds en 3-4 phrases max.
+- Accueille chaleureusement le prospect.
+- Amène-le à préciser son projet avec une question courte.
+- Ne liste JAMAIS tout le catalogue.
 - Réponds TOUJOURS en français."""
 
 def generer_amorce(message_utilisateur, numero_tel):
     """
-    Génère une réponse d'accueil intelligente pour le premier message d'un prospect.
+    Génère une réponse d'accueil intelligente pour le premier message d'un prospect,
+    en utilisant les données dynamiques de la BDD.
     """
     try:
+        from whatsapp_bot.models import BotKnowledge
+        knowledge = BotKnowledge.get_solo()
+        prompt_amorce = PROMPT_AMORCE_TEMPLATE.format(
+            etablissement_nom=knowledge.etablissement_nom,
+            etablissement_site=knowledge.etablissement_site,
+            catalogue_formations=knowledge.catalogue_formations,
+            horaires=knowledge.horaires
+        )
+    except Exception as e:
+        print(f"⚠️ Erreur BDD pour l'amorce ({e}), fallback statique.")
+        prompt_amorce = PROMPT_AMORCE_TEMPLATE.format(
+            etablissement_nom="Bakeli School of Technology",
+            etablissement_site="bakeli.tech",
+            catalogue_formations=CATALOGUE_FORMATIONS,
+            horaires="Cours en présentiel du lundi au vendredi."
+        )
+
+    try:
         messages = [
-            {"role": "system", "content": PROMPT_AMORCE},
+            {"role": "system", "content": prompt_amorce},
             {"role": "user", "content": message_utilisateur},
         ]
 

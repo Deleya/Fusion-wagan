@@ -204,69 +204,81 @@ def dashboard_api(request):
         if msg.sentiment_label:
             users_latest_sentiment[msg.phone_number] = msg.sentiment_label
             
-    positifs = list(users_latest_sentiment.values()).count('positive')
-    negatifs = list(users_latest_sentiment.values()).count('negative')
-    neutres = list(users_latest_sentiment.values()).count('neutral')
-    
-    nb_analyses = positifs + negatifs + neutres
-    
+    labels_values = list(users_latest_sentiment.values())
+    positifs      = labels_values.count('positive')
+    neutres       = labels_values.count('neutral')
+    nb_lost_leads = labels_values.count('lost_lead')
+    nb_bot_stuck  = labels_values.count('bot_stuck')
+    nb_angry      = labels_values.count('angry')
+
+    # nb_analyses inclut tous les labels réels (on retire le label obsolète 'negative')
+    nb_analyses = positifs + neutres + nb_lost_leads + nb_bot_stuck + nb_angry
+
     p_positif = round((positifs / nb_analyses * 100), 1) if nb_analyses > 0 else 0
-    p_negatif = round((negatifs / nb_analyses * 100), 1) if nb_analyses > 0 else 0
-    p_neutre = round((neutres / nb_analyses * 100), 1) if nb_analyses > 0 else 0
+    p_neutre  = round((neutres  / nb_analyses * 100), 1) if nb_analyses > 0 else 0
     
     # ===== ANALYSE DE CONVERSION APPROFONDIE =====
-    # Un prospect est considéré "converti" UNIQUEMENT si :
-    # 1. Son dernier sentiment est "positive" (il finit convaincu)
-    # 2. Il a au moins 2 messages analysés (pas un simple "bonjour" positif)
-    # 3. On compte TOUS les messages échangés avant d'atteindre
-    #    le premier message "positive" qui est MAINTENU jusqu'à la fin
-    #    (= pas un faux positif suivi d'un retour en neutral/negative)
-    
+    # Logique : un prospect est "converti" si son DERNIER sentiment analysé est "positive".
+    # avg_messages_to_convert = moyenne du nb de msgs TOTAUX échangés avant que le prospect
+    # devienne positif pour la 1ère fois de manière stable (= reste positif jusqu'à la fin).
+    # On compte les msgs totaux (pas juste ceux analysés) car l'amorce et les boutons
+    # font partie de l'effort de conviction.
     conversion_counts = []
     nb_prospects_convertis = 0
     
     for phone, msgs in user_messages.items():
-        # Extraire seulement les messages qui ont un sentiment analysé
+        # Construire la timeline des sentiments analysés
         sentiments_timeline = []
         for i, m in enumerate(msgs):
             if m.sentiment_label:
                 sentiments_timeline.append({
-                    'index': i + 1,  # position dans la conversation (1-based)
+                    'msg_total_index': i + 1,  # position RÉELLE dans la conversation (tous msgs inclus)
                     'label': m.sentiment_label,
                     'score': m.sentiment_score or 0.5
                 })
         
-        if len(sentiments_timeline) < 2:
-            continue  # Pas assez de données pour juger une conversion
+        if not sentiments_timeline:
+            continue  # Aucun message analysé pour ce prospect
         
+        # Le prospect est converti SEULEMENT si son tout dernier sentiment est "positive"
+        # On exclut les cas où il était positif au milieu mais a abandonné ensuite (lost_lead)
         dernier_sentiment = sentiments_timeline[-1]['label']
         
         if dernier_sentiment != 'positive':
-            continue  # Le prospect n'a PAS fini positivement → pas converti
+            continue  # Pas converti (neutral, lost_lead, bot_stuck, angry)
         
-        # Trouver le point de bascule : le PREMIER "positive" 
-        # à partir duquel il RESTE positif jusqu'à la fin
-        point_de_bascule = None
+        # Trouver le PREMIER "positive" stable :
+        # = le 1er message positif à partir duquel TOUS les suivants sont aussi positifs
+        point_de_bascule_index = None
         for idx in range(len(sentiments_timeline)):
-            # Vérifier si à partir de cet index, tous les sentiments restants sont positifs
             remaining = sentiments_timeline[idx:]
             if all(s['label'] == 'positive' for s in remaining):
-                point_de_bascule = sentiments_timeline[idx]['index']
+                # On prend l'index TOTAL dans la conversation (msgs réels, pas juste analysés)
+                point_de_bascule_index = sentiments_timeline[idx]['msg_total_index']
                 break
-        
-        if point_de_bascule is not None:
+                
+        if point_de_bascule_index is not None:
             nb_prospects_convertis += 1
-            conversion_counts.append(point_de_bascule)
-    
+            conversion_counts.append(point_de_bascule_index)
+            
     avg_messages_to_convert = 0
     if conversion_counts:
         avg_messages_to_convert = round(sum(conversion_counts) / len(conversion_counts), 1)
-    
+        
     # Taux de conversion réel
     taux_conversion = 0
     if utilisateurs > 0:
         taux_conversion = round((nb_prospects_convertis / utilisateurs * 100), 1)
     
+    # Mapping complet des 5 labels vers un statut lisible + couleur pour le frontend
+    STATUT_MAP = {
+        'positive':  ('Chaud 🔥',      '#22c55e'),
+        'neutral':   ('Froid ❄️',       '#6b7280'),
+        'lost_lead': ('Perdu 🚨',       '#f59e0b'),
+        'bot_stuck': ('Bloqué 🧱',      '#f97316'),
+        'angry':     ('Irrité 😡',      '#ef4444'),
+    }
+
     # Liste détaillée des prospects
     prospects_list = []
     for phone, msgs in user_messages.items():
@@ -279,16 +291,10 @@ def dashboard_api(request):
         scores = [m.sentiment_score for m in msgs if m.sentiment_score is not None]
         avg_score = round(sum(scores) / len(scores), 2) if scores else 0
         
-        # Statut lisible
-        if sentiment == 'positive':
-            statut = 'Chaud'
-        elif sentiment == 'negative':
-            statut = 'Alerte'
-        elif sentiment == 'neutral':
-            statut = 'Froid'
-        else:
-            statut = 'En attente'
-        
+        statut_info = STATUT_MAP.get(sentiment, ('En attente ⏳', '#3b82f6'))
+        statut = statut_info[0]
+        color  = statut_info[1]
+
         prospects_list.append({
             'phone': phone,
             'nb_messages': nb_msgs,
@@ -296,26 +302,45 @@ def dashboard_api(request):
             'last_contact': last_contact,
             'sentiment': sentiment,
             'statut': statut,
+            'color': color,
             'avg_score': avg_score,
         })
     
     # Trier par dernier contact desc
     prospects_list.sort(key=lambda x: x['last_contact'], reverse=True)
-    
+
+    # KPI : % de prospects avec au moins 1 message bot_stuck
+    from datetime import timedelta
+    prospects_with_stuck = sum(
+        1 for msgs in user_messages.values()
+        if any(m.sentiment_label == 'bot_stuck' for m in msgs)
+    )
+    taux_bot_stuck = round((prospects_with_stuck / utilisateurs * 100), 1) if utilisateurs > 0 else 0
+
+    # KPI : hot leads des dernières 24h (sentiment positif + dernier message récent)
+    hier = timezone.now() - timedelta(hours=24)
+    hot_leads_today = sum(
+        1 for phone, msgs in user_messages.items()
+        if users_latest_sentiment.get(phone) == 'positive' and msgs[-1].timestamp >= hier
+    )
+
     context = {
         'total': total,
         'utilisateurs': utilisateurs,
         'positifs': positifs,
-        'negatifs': negatifs,
         'neutres': neutres,
+        'nb_lost_leads': nb_lost_leads,
+        'nb_bot_stuck': nb_bot_stuck,
+        'nb_angry': nb_angry,
         'pending': pending,
         'nb_analyses': nb_analyses,
         'p_positif': p_positif,
-        'p_negatif': p_negatif,
         'p_neutre': p_neutre,
         'avg_messages_to_convert': avg_messages_to_convert,
         'nb_prospects_convertis': nb_prospects_convertis,
         'taux_conversion': taux_conversion,
+        'taux_bot_stuck': taux_bot_stuck,
+        'hot_leads_today': hot_leads_today,
         'prospects_list': prospects_list,
         'now': timezone.now().isoformat()
     }
@@ -332,10 +357,6 @@ def bot_config_api(request):
     """
     GET  /whatsapp/config/ — Retourne la configuration actuelle du bot.
     PUT  /whatsapp/config/ — Met à jour la configuration du bot.
-
-    Utilisé par l'onglet 'Configuration' du Dashboard React.
-    Le pattern Singleton BotKnowledge.get_solo() garantit
-    qu'il n'y a jamais plus d'un enregistrement en base.
     """
     config = BotKnowledge.get_solo()
 
@@ -350,13 +371,11 @@ def bot_config_api(request):
             'updated_at': config.updated_at.isoformat(),
         })
 
-    # PUT — Mise à jour de la configuration
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({'error': 'JSON invalide.'}, status=400)
 
-    # Champs autorisés à être modifiés (whitelist de sécurité)
     champs_autorises = [
         'etablissement_nom',
         'etablissement_description',
@@ -371,11 +390,23 @@ def bot_config_api(request):
             setattr(config, champ, data[champ])
 
     config.save()
-
     print(f"✅ BotKnowledge mis à jour par l'admin à {timezone.now()}")
 
     return JsonResponse({
         'success': True,
         'message': 'Configuration du bot mise à jour avec succès.',
         'updated_at': config.updated_at.isoformat(),
-    })
+    })
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def hot_leads_api(request):
+    numeros = Message.objects.order_by().values_list('phone_number', flat=True).distinct()
+    hot_leads = []
+    for numero in numeros:
+        dernier_message = Message.objects.filter(phone_number=numero).order_by('-timestamp').first()
+        if dernier_message and dernier_message.sentiment_label == 'positive':
+            hot_leads.append({'phone_number': numero, 'last_message': dernier_message.message_text, 'sentiment_score': dernier_message.sentiment_score, 'timestamp': dernier_message.timestamp.isoformat()})
+    hot_leads.sort(key=lambda x: x['timestamp'], reverse=True)
+    return JsonResponse({'hot_leads': hot_leads})

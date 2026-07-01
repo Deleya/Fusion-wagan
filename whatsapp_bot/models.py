@@ -10,11 +10,13 @@ class Message(models.Model):
     
     sentiment_score = models.FloatField(null=True, blank=True)   # ex: 0.85
     sentiment_label = models.CharField(
-        max_length=10,
+        max_length=15,
         choices=[
-            ('positive', 'Positive'),
-            ('negative', 'Negative'),
+            ('positive', 'Positive (Hot Lead)'),
             ('neutral', 'Neutral'),
+            ('lost_lead', 'Lost Lead (Abandon)'),
+            ('bot_stuck', 'Bot Stuck (Impasse)'),
+            ('angry', 'Angry (Mécontent)'),
         ],
         null=True,
         blank=True
@@ -151,3 +153,18 @@ class BotKnowledge(models.Model):
         )
         return obj
 
+class ConversationState(models.Model):
+    """
+    Stocke l'historique de la conversation (mémoire du LLM) pour un numéro de téléphone donné.
+    Remplace la mémoire RAM volatile qui posait problème lors des redémarrages ou du multi-processing.
+    """
+    phone_number = models.CharField(max_length=20, unique=True, db_index=True)
+    history = models.JSONField(default=list)  # Stocke une liste de dicts [{"role": "user", "content": "..."}, ...]
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "État de la conversation"
+        verbose_name_plural = "États des conversations"
+
+    def __str__(self):
+        return f"Historique de {self.phone_number} ({len(self.history)} messages)"

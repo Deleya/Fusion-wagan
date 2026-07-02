@@ -7,6 +7,9 @@ from django.conf import settings
 from .models import Message, BotKnowledge
 from .celery_tasks import process_message_async
 from django.utils import timezone
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAdminUser
+from rest_framework.response import Response
 
 
 def extract_message_data(webhook_data):
@@ -173,6 +176,8 @@ def whatsapp_webhook(request):
         return JsonResponse({"status": "error_acknowledged"}, status=200)
 
 
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
 def dashboard_api(request):
     qs = Message.objects.all()
     
@@ -344,15 +349,15 @@ def dashboard_api(request):
         'prospects_list': prospects_list,
         'now': timezone.now().isoformat()
     }
-    return JsonResponse(context)
+    return Response(context)
 
 
 # ============================================================
 # API CONFIGURATION DU BOT (Base de Connaissances Dynamique)
 # ============================================================
 
-@csrf_exempt
-@require_http_methods(["GET", "PUT"])
+@api_view(['GET', 'PUT'])
+@permission_classes([IsAdminUser])
 def bot_config_api(request):
     """
     GET  /whatsapp/config/ — Retourne la configuration actuelle du bot.
@@ -360,21 +365,23 @@ def bot_config_api(request):
     """
     config = BotKnowledge.get_solo()
 
-    if request.method == "GET":
-        return JsonResponse({
+    if request.method == 'GET':
+        return Response({
             'etablissement_nom': config.etablissement_nom,
             'etablissement_description': config.etablissement_description,
             'etablissement_site': config.etablissement_site,
             'etablissement_inscription': config.etablissement_inscription,
             'catalogue_formations': config.catalogue_formations,
             'horaires': config.horaires,
-            'updated_at': config.updated_at.isoformat(),
+            'updated_at': config.updated_at.isoformat() if config.updated_at else None,
         })
 
+    # Traitement du PUT
     try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({'error': 'JSON invalide.'}, status=400)
+        # request.data est un dictionnaire avec DRF (plus besoin de json.loads)
+        data = request.data
+    except Exception as e:
+        return Response({'success': False, 'error': 'Invalid JSON'}, status=400)
 
     champs_autorises = [
         'etablissement_nom',
@@ -392,15 +399,16 @@ def bot_config_api(request):
     config.save()
     print(f"✅ BotKnowledge mis à jour par l'admin à {timezone.now()}")
 
-    return JsonResponse({
+    return Response({
         'success': True,
         'message': 'Configuration du bot mise à jour avec succès.',
         'updated_at': config.updated_at.isoformat(),
     })
 
 
-@csrf_exempt
-@require_http_methods(['GET'])
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
 def hot_leads_api(request):
     numeros = Message.objects.order_by().values_list('phone_number', flat=True).distinct()
     hot_leads = []
@@ -409,4 +417,4 @@ def hot_leads_api(request):
         if dernier_message and dernier_message.sentiment_label == 'positive':
             hot_leads.append({'phone_number': numero, 'last_message': dernier_message.message_text, 'sentiment_score': dernier_message.sentiment_score, 'timestamp': dernier_message.timestamp.isoformat()})
     hot_leads.sort(key=lambda x: x['timestamp'], reverse=True)
-    return JsonResponse({'hot_leads': hot_leads})
+    return Response({'hot_leads': hot_leads})

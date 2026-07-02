@@ -16,8 +16,11 @@ if cors_env:
 else:
     CORS_ALLOWED_ORIGINS = []
 
-# Secure Cookies for HTTPS
+# Cookies sécurisés uniquement si le serveur tourne en HTTPS (vrai déploiement).
+# En démo Docker locale (HTTP), on désactive pour ne pas bloquer la connexion.
+# En prod réelle : ajouter HTTPS_ENABLED=true dans les variables d'env du serveur.
+_https_enabled = os.getenv("HTTPS_ENABLED", "false").lower() == "true"
 SESSION_COOKIE_SAMESITE = "None"
-SESSION_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = _https_enabled
 CSRF_COOKIE_SAMESITE = "None"
-CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = _https_enabled

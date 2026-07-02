@@ -88,17 +88,21 @@ def process_message_async(self, phone_number, message_text, message_type, messag
         print(f"🔄 Traitement async commencé: {phone_number}")
 
         # 0. Vérifier si le message a déjà été traité (Concurrence / Retry Meta)
-        message_obj = Message.objects.filter(id=message_id).first()
-        if not message_obj:
-            print(f"❌ Message introuvable au moment du traitement: {message_id}")
-            return
-        if message_obj.processed:
-            print(f"⚠️  Message déjà traité (ignorer doublon): {message_id}")
-            return
-            
-        # Verrouillage immédiat pour éviter les doublons de webhook
-        message_obj.processed = True
-        message_obj.save()
+        # select_for_update() pose un verrou SQL sur la ligne le temps de la vérification.
+        # Si deux webhooks identiques arrivent en même temps, le 2e attendra que le 1er
+        # ait fini de poser processed=True avant de lire la valeur → plus de doublons.
+        from django.db import transaction
+        with transaction.atomic():
+            message_obj = Message.objects.select_for_update().filter(id=message_id).first()
+            if not message_obj:
+                print(f"❌ Message introuvable au moment du traitement: {message_id}")
+                return
+            if message_obj.processed:
+                print(f"⚠️  Message déjà traité (ignorer doublon): {message_id}")
+                return
+            # Verrouillage immédiat pour éviter les doublons de webhook
+            message_obj.processed = True
+            message_obj.save()
 
         # --- Commande de test pour le développeur ---
         if message_type == 'text' and message_text.strip().lower() == 'reset':

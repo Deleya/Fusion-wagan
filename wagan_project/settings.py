@@ -30,17 +30,22 @@ BAKELI_AI_KEY = os.getenv("BAKELI_AI_KEY")
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DJANGO_SECURITY")
+DEBUG = os.getenv("DEBUG", "False") == "True"
 
-ALLOWED_HOSTS = ["*"]
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
 
-# CORS — autoriser le frontend à envoyer des cookies de session
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000",
-]
+
+# Charger les origines CORS depuis l'environnement, sinon valeurs de dev
+cors_env = os.getenv("CORS_ALLOWED_ORIGINS", "")
+if cors_env:
+    CORS_ALLOWED_ORIGINS = cors_env.split(",")
+else:
+    CORS_ALLOWED_ORIGINS = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+    ]
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 GOOGLE_REDIRECT_URI = os.getenv(
@@ -54,9 +59,9 @@ CORS_ALLOW_ALL_ORIGINS = False
 
 # Cookie de session transmissible en cross-origin (requis pour djoser.social OAuth)
 SESSION_COOKIE_SAMESITE = "None"
-SESSION_COOKIE_SECURE = False  # True en production (HTTPS)
+SESSION_COOKIE_SECURE = not DEBUG  # True en production (HTTPS)
 CSRF_COOKIE_SAMESITE = "None"
-CSRF_COOKIE_SECURE = False  # True en production (HTTPS)
+CSRF_COOKIE_SECURE = not DEBUG  # True en production (HTTPS)
 
 # Application definition
 
@@ -85,6 +90,7 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -174,6 +180,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/3.1/howto/static-files/
 
 STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # settings.py
 

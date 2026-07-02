@@ -186,10 +186,19 @@ def ajouter_au_historique(numero_tel, role, contenu):
     """
     Ajoute un message à l'historique de la BDD.
     role: 'user' ou 'assistant'
+
+    Les messages utilisateurs sont tronqués à 500 caractères pour éviter
+    de dépasser la limite de tokens du LLM (économie de coût + stabilité).
     """
+    MAX_CONTENT_LENGTH = 500
     from whatsapp_bot.models import ConversationState
     state, created = ConversationState.objects.get_or_create(phone_number=numero_tel)
-    
+
+    # Tronquer si nécessaire (uniquement pour les messages utilisateurs)
+    if role == 'user' and len(contenu) > MAX_CONTENT_LENGTH:
+        print(f"⚠️ Message tronqué: {len(contenu)} -> {MAX_CONTENT_LENGTH} chars pour {numero_tel}")
+        contenu = contenu[:MAX_CONTENT_LENGTH] + " [...]"
+
     state.history.append({"role": role, "content": contenu})
     
     # On garde seulement les N derniers messages pour éviter

@@ -29,8 +29,8 @@ services:
       - DATABASE=postgres://wagan_user:wagan_password@db:5432/wagan_db
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      # Autorise le frontend local à communiquer avec l'API (démo Docker)
-      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,web
+      # Autorise le frontend local et ngrok à communiquer avec l'API
+      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,web,.ngrok-free.app,.ngrok.io
       - CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://localhost
       # HTTPS_ENABLED=true uniquement en vrai déploiement avec certificat SSL
       - HTTPS_ENABLED=false
@@ -51,7 +51,7 @@ services:
       - DATABASE=postgres://wagan_user:wagan_password@db:5432/wagan_db
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,web
+      - ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,web,.ngrok-free.app,.ngrok.io
       - HTTPS_ENABLED=false
     restart: always
     depends_on:

@@ -24,6 +24,11 @@ COPY . /app/
 # Collecte des fichiers statiques (WhiteNoise s'en chargera via Nginx/Gunicorn)
 # RUN python manage.py collectstatic --noinput
 
+# Utilisateur non-root pour l'exécution (gunicorn/celery)
+RUN groupadd -r appuser && useradd -r -g appuser appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
 # Le port d'écoute de Gunicorn
 EXPOSE 8000
 

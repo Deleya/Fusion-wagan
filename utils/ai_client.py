@@ -11,7 +11,7 @@ def ask(messages: list, model: str = "openai/gpt-oss-20b") -> str:
             f"{settings.BAKELI_AI_URL}/v1/chat",
             headers={"Authorization": f"Bearer {settings.BAKELI_AI_KEY}"},
             json={"model": model, "messages": messages},
-            timeout=15, # Timeout réduit pour basculer rapidement si Bakeli est down
+            timeout=5, # Circuit Breaker: 5s max sur l'API principale
         )
         resp.raise_for_status()
         return resp.json()["message"]["content"]
@@ -30,7 +30,7 @@ def ask(messages: list, model: str = "openai/gpt-oss-20b") -> str:
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {groq_key}"},
             json={"model": groq_model, "messages": messages},
-            timeout=30,
+            timeout=5, # Circuit Breaker: 5s max sur le fallback
         )
         groq_resp.raise_for_status()
         return groq_resp.json()["choices"][0]["message"]["content"]

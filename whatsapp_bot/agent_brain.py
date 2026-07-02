@@ -8,6 +8,7 @@ son rôle d'assistant de service client.
 
 from utils.ai_client import ask
 from decouple import config
+import requests
 
 # Numéro de contact officiel Bakeli (configurable via .env)
 CONTACT_PHONE_NUMBER = config('CONTACT_PHONE_NUMBER', default='+221 78 301 38 38')
@@ -270,18 +271,23 @@ def generer_reponse(message_utilisateur, numero_tel, sentiment=None, score=None)
         print(f"🧠 Agent Brain — Réponse générée ({len(reponse_ia)} chars)")
         return reponse_ia, False
 
+    except requests.exceptions.Timeout as e:
+        print(f"⚡ CIRCUIT BREAKER ACTIF: Timeout de l'API IA (plus de 10s d'attente globale) - {e}")
+        # Bascule immédiate sur le fallback
+        return fallback_reponse(sentiment), True
     except Exception as e:
         # LOG de l'erreur pour l'admin (dans ton terminal Celery)
         print(f"❌ ERREUR CRITIQUE GROQ : {e}")
-
         # RÉPONSE DE SECOURS (Le Fallback)
-        fallbacks = {
-            "negative": f"Je suis sincèrement désolé, je rencontre une petite difficulté technique. Un conseiller Bakeli sera disponible au {CONTACT_PHONE_NUMBER}.",
-            "positive": f"Merci pour votre enthousiasme ! Je rencontre un petit souci technique, mais notre équipe reste disponible au {CONTACT_PHONE_NUMBER}.",
-            "neutral": f"Merci pour votre message. Je rencontre une maintenance temporaire. N'hésitez pas à contacter Bakeli au {CONTACT_PHONE_NUMBER} ou via bakeli.tech."
-        }
-        fallback_msg = fallbacks.get(sentiment, f"Merci de votre patience, notre assistant IA est en maintenance. Contactez Bakeli au {CONTACT_PHONE_NUMBER} !")
-        return fallback_msg, True
+        return fallback_reponse(sentiment), True
+
+def fallback_reponse(sentiment):
+    fallbacks = {
+        "negative": f"Je suis sincèrement désolé, je rencontre une petite difficulté technique. Un conseiller Bakeli sera disponible au {CONTACT_PHONE_NUMBER}.",
+        "positive": f"Merci pour votre enthousiasme ! Je rencontre un petit souci technique, mais notre équipe reste disponible au {CONTACT_PHONE_NUMBER}.",
+        "neutral": f"Merci pour votre message. Je rencontre une maintenance temporaire. N'hésitez pas à contacter Bakeli au {CONTACT_PHONE_NUMBER} ou via bakeli.tech."
+    }
+    return fallbacks.get(sentiment, f"Merci de votre patience, notre assistant IA est en maintenance. Contactez Bakeli au {CONTACT_PHONE_NUMBER} !")
 
 # ============================================================
 # AMORCE INTELLIGENTE — Réponse au premier message

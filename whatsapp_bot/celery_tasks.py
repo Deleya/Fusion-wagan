@@ -153,6 +153,11 @@ def process_message_async(self, phone_number, message_text, message_type, messag
                     # Prendre les 6 derniers échanges
                     derniers_echanges = state.history[-6:]
                     derniers_messages = [f"{msg['role'].upper()}: {msg['content']}" for msg in derniers_echanges]
+                    # L'historique n'est enrichi qu'APRÈS la génération de la réponse
+                    # (agent_brain.ajouter_au_historique) : le message en cours de
+                    # traitement n'y figure pas encore. Sans cet ajout, le LLM analyse
+                    # la conversation SANS le dernier message du prospect.
+                    derniers_messages.append(f"USER: {message_text}")
                 else:
                     derniers_messages = [f"USER: {message_text}"]
 

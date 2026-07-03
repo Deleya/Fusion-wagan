@@ -75,3 +75,25 @@ class TransferSuperAdminView(APIView):
             return Response({"message": f"Rôle de Super Admin transféré à {target_user.email}."}, status=status.HTTP_200_OK)
         except User.DoesNotExist:
             return Response({"error": "Utilisateur introuvable."}, status=status.HTTP_404_NOT_FOUND)
+
+class DeleteUserView(APIView):
+    permission_classes = [IsAdminUser]
+
+    def delete(self, request, pk):
+        try:
+            target_user = User.objects.get(pk=pk)
+            
+            # Ne pas permettre à l'utilisateur de se supprimer lui-même
+            if target_user == request.user:
+                return Response({"error": "Vous ne pouvez pas vous supprimer vous-même."}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Seuls les simples utilisateurs peuvent être supprimés (ni staff, ni superuser)
+            if target_user.is_staff or target_user.is_superuser:
+                return Response({"error": "Impossible de supprimer un Administrateur ou Super Admin."}, status=status.HTTP_403_FORBIDDEN)
+            
+            target_user.delete()
+            return Response({"message": "Utilisateur supprimé avec succès."}, status=status.HTTP_204_NO_CONTENT)
+            
+        except User.DoesNotExist:
+            return Response({"error": "Utilisateur introuvable."}, status=status.HTTP_404_NOT_FOUND)
+

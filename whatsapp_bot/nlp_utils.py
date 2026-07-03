@@ -49,7 +49,102 @@ Exemple 8 — NEUTRAL :
 ASSISTANT: Nous proposons plusieurs formations en tech et marketing.
 USER: et pour les cours du soir c'est possible ?
 → LABEL: neutral (question d'exploration, pas encore de décision)
+
+Exemple 9 — NEUTRAL :
+ASSISTANT: Les cours d'informatique ne sont pas disponibles en ce moment.
+USER: Daccord les cours de developpement web m'interesse egalement
+→ LABEL: neutral (Le prospect explore une autre option suite à une indisponibilité, c'est une marque d'intérêt, PAS un abandon)
 """
+
+# =============================================================================
+# FILET DE SÉCURITÉ (post-traitement déterministe)
+# Corrige les erreurs de jugement du LLM sur le label 'neutral' UNIQUEMENT.
+# EXIGENCE DE PRÉCISION : chaque pattern force le label avec une confiance de
+# 0.90 et déclenche une alerte CRM → un pattern ne doit matcher QUE des
+# intentions non ambiguës (négation explicite obligatoire pour lost_lead).
+# =============================================================================
+
+# --- Patterns LOST_LEAD (désintérêt / abandon) — testés dans CET ordre ---
+_PATTERNS_LOST_LEAD = [
+    # Négation d'intérêt, fautes tolérées : "ne suis plus/plis intéressé",
+    # "pas intéressé", "plus du tout intéressé", "jamais intéressé"
+    r"(ne\s*suis\s*pl[iu]s|pl[iu]s\s*du\s*tout|pas\s*du\s*tout|pas|jamais)\s*int[eé]ress[eé]",
+    # Ordre inversé : "ça ne m'intéresse plus/pas" (négation ne/n' obligatoire)
+    r"\b(ne|n')\s*(m'\s*)?int[eé]resse\s+(plus|pas)\b",
+    # "je suis plus intéressé" SANS "par/que" derrière (sinon c'est un comparatif
+    # = intérêt pour une alternative, ex: "je suis plus intéressé par le dev web")
+    r"suis\s+pl[iu]s\s+int[eé]ress[eé]e?s?\b(?!\s+(par|que)\b)",
+    # Faute de frappe réelle observée en production
+    r"plsuinteress",
+    # Abandon explicite
+    r"laisse[rz]?\s{0,5}tomber",
+    r"j'\s*abandonne",
+    # Contrainte empêchant l'inscription — NÉGATION OBLIGATOIRE ("peux pas",
+    # "permet pas"). "je peux m'inscrire ?" ne doit JAMAIS matcher (lead chaud).
+    r"(permet|peux|peut|pourrai\w*)\s*(pas|plus|pu)\b.{0,30}(inscri|payer|suivre|commencer|continuer|venir)",
+    r"(temps|emploi|emploie|travail|boulot|schedule).{0,25}permet\s*(pas|plus)",
+    r"finalement.{0,30}(pas|plus|pu).{0,30}(inscri|int[eé]ress|interest)",
+    # Formules de congé polies sénégalaises — "merci quand mm" = AU REVOIR
+    r"merci\s+(quand\s+(mm|meme|même)|mais\s+non)",
+    r"\b(bye|ciao)\b",
+    r"au\s*revoir",
+    r"bonne\s+continuation",
+    # Contrainte financière explicite (Exemple 7)
+    r"trop\s+cher",
+]
+
+# --- Patterns POSITIVE (conversion / inscription) ---
+_PATTERNS_POSITIVE = [
+    r"(m'?\s*inscri|commencer|payer|je\s+veux|je\s+souhaite).{0,30}(formation|cours|maintenant|semaine)",
+    r"je\s+(veux|souhaite)\s+(le\s+faire|m'?\s*inscri)",
+    r"(ok|oui|d'?\s*accord|je).{0,15}(veux|veux\s+bien|souhaite|aimerais).{0,15}(inscri|commenc|payer)",
+    # Question pratique d'inscription = intention d'achat ("comment je peux m'inscrire ?")
+    r"(comment|quand|o[uù])\s.{0,25}(inscri|payer|commencer)",
+    r"(peux|peut|pourrais?)\s+(m'?\s*)?inscri",
+]
+
+
+def _dernier_message_user(messages_textes):
+    """
+    Retourne le texte du dernier message USER (minuscules, apostrophes normalisées).
+    Les entrées sont au format "USER: ..." / "ASSISTANT: ..." (ou du texte brut).
+    Le filet de sécurité ne doit JAMAIS s'appliquer à un message de l'ASSISTANT
+    (ex: "vous pouvez vous inscrire..." matcherait un pattern positif).
+    """
+    for entree in reversed(messages_textes or []):
+        texte = entree.strip()
+        if texte.upper().startswith("ASSISTANT:"):
+            continue
+        if texte.upper().startswith("USER:"):
+            texte = texte[5:]
+        return texte.replace("’", "'").lower().strip()
+    return ""
+
+
+def appliquer_filet_securite(label, score, texte_dernier_msg):
+    """
+    Passe de mots-clés déterministe appliquée UNIQUEMENT quand le LLM répond
+    'neutral'. lost_lead est testé AVANT positive (ex: "je peux pas m'inscrire"
+    contient "inscrire" mais doit rester lost_lead).
+    Retourne (label, score) — inchangés si aucun pattern ne matche.
+    """
+    if label != 'neutral' or not texte_dernier_msg:
+        return label, score
+
+    t = texte_dernier_msg.replace("’", "'").lower()
+
+    for pattern in _PATTERNS_LOST_LEAD:
+        if re.search(pattern, t):
+            print(f"[NLP] Filet de securite active : neutral -> lost_lead (pattern: {pattern})")
+            return 'lost_lead', 0.90
+
+    for pattern in _PATTERNS_POSITIVE:
+        if re.search(pattern, t):
+            print(f"[NLP] Filet de securite active : neutral -> positive (pattern: {pattern})")
+            return 'positive', 0.90
+
+    return label, score
+
 
 def analyser_sentiment_global(messages_textes):
     """
@@ -73,6 +168,7 @@ CONTEXTE CULTUREL IMPORTANT :
 - Sers-toi toujours de la question précédente de l'ASSISTANT pour interpréter une réponse courte du USER.
   Ex : ASSISTANT="Voulez-vous vous inscrire ?" + USER="Oui" → POSITIVE.
   Ex : ASSISTANT="Autre chose ?" + USER="Non merci" → peut être LOST_LEAD selon le ton.
+- ATTENTION : Si le prospect dit "d'accord" ou accepte de changer de formation suite à une indisponibilité, c'est NEUTRAL ou POSITIVE, ce n'est PAS un abandon (LOST_LEAD).
 
 RÈGLES DE CLASSIFICATION (5 STATUTS) :
 1. "positive"  — Intention claire d'inscription, de paiement, ou de démarrage de formation.
@@ -125,62 +221,27 @@ Le champ 'reason' est une courte explication de ton choix (utile pour le debug, 
         if label in ['angry', 'lost_lead'] and score < 0.72:
             label = 'neutral'
             
-        # =================================================================
-        # FILET DE SÉCURITÉ (Post-traitement)
-        # L'IA (20B) fait parfois des erreurs de jugement sur le statut 'neutral'.
-        # Si elle classifie comme neutre, on effectue une passe de mots-clés robuste
-        # pour corriger les intentions évidentes (et tolérer les fautes de frappe).
-        # =================================================================
-        texte_dernier_msg = messages_textes[-1].lower() if messages_textes else ""
-        
-        if label == 'neutral':
-            # Mots-clés pour LOST LEAD (Désintérêt / Abandon)
-            # Patterns regex tolérant les fautes de frappe et les mots intercalés
-            est_lost_lead = (
-                re.search(r"(plus|plsu|plus?).{0,10}int[eé]ress[eé]", texte_dernier_msg) or
-                re.search(r"plsuinteress", texte_dernier_msg) or
-                re.search(r"laisse.{0,5}tomber", texte_dernier_msg) or
-                re.search(r"(permet|peux|peux pas|peux pu).{0,25}(inscrire|inscire|s'inscr)", texte_dernier_msg) or
-                re.search(r"(temps|emploi|emploie|schedule).{0,20}(permet|peux|empêche).{0,20}(inscr|payer)", texte_dernier_msg) or
-                re.search(r"finalement.{0,30}(pas|plus|pu).{0,30}(inscr|intéress|interest)", texte_dernier_msg) or
-                re.search(r"plus int[eé]ress[eé]", texte_dernier_msg) or
-                # Formules de congé polies sénégalaises — "merci quand mm" = "merci quand même" = AU REVOIR
-                re.search(r"merci (quand (mm|meme|même)|mais non)", texte_dernier_msg) or
-                re.search(r"\b(bye|ciao)\b", texte_dernier_msg) or
-                re.search(r"(au revoir|bonne continuation).{0,10}$", texte_dernier_msg) or
-                "trop cher" in texte_dernier_msg or
-                "pas intéressé" in texte_dernier_msg or
-                "au revoir" in texte_dernier_msg
-            )
-            if est_lost_lead:
-                label = 'lost_lead'
-                score = 0.90
-                print("[NLP] Filet de securite active : neutral -> lost_lead")
-                
-            # Mots-clés pour POSITIVE (Conversion / Inscription)
-            elif re.search(r"(m.inscrire|m.inscire|commencer|payer|je veux|je souhaite).{0,30}(formation|cours|maintenant|semaine)", texte_dernier_msg) or \
-                 re.search(r"je (veux|souhaite) (le faire|m.inscrire|m.inscire)", texte_dernier_msg) or \
-                 re.search(r"(ok|oui|d.accord|je).{0,15}(veux|veux bien|souhaite|aimerais).{0,15}(inscr|commenc|payer)", texte_dernier_msg):
-                label = 'positive'
-                score = 0.90
-                print("[NLP] Filet de securite active : neutral -> positive")
-                
+        # Filet de sécurité déterministe — appliqué au dernier message USER
+        # uniquement (jamais à une ligne ASSISTANT de l'historique).
+        texte_dernier_msg = _dernier_message_user(messages_textes)
+        label, score = appliquer_filet_securite(label, score, texte_dernier_msg)
+
         print(f"📊 Résultat Intention: {label} (confiance: {score})")
         return {'label': label, 'score': score}
 
     except Exception as e:
         print(f"❌ Erreur Groq IA Sentiment: {e}")
         # Logique de secours basique (Fallback complet si l'API crash)
-        texte_complet = messages_textes[-1].lower() if messages_textes else ""
-        
-        mots_angry = ['escroc', 'arnaque', 'rembourser', 'remboursement', 'plainte', 'incompétent', 'honte', 'nul', 'nul']
+        texte_complet = _dernier_message_user(messages_textes)
+
+        mots_angry = ['escroc', 'arnaque', 'rembourser', 'remboursement', 'plainte', 'incompétent', 'honte', 'nul']
         mots_lost = ['intéresse plus', 'pas satisfait', 'laisse tomber', 'plus intéressé', 'au revoir', 'trop cher', 'laisser tomber', 'plsuinteresser', 'merci quand mm', 'merci quand même', 'ciao', 'bye']
         mots_stuck = ['humain', 'conseiller', 'tourne en rond', 'réponds pas', 'comprends rien']
         mots_positifs = ['oui', 'inscription', 'payer', 'comment', 'intéressé', 'super', 'génial', 'commencer', 'je veux le faire', 'prix', 'm\'inscire', 'm\'inscrire']
         
         if any(mot in texte_complet for mot in mots_angry):
             return {'label': 'angry', 'score': 0.8}
-        if any(mot in texte_complet for mot in mots_lost) or re.search(r"(plus|plsu).*int[eé]ress[eé]r?", texte_complet):
+        if any(mot in texte_complet for mot in mots_lost) or re.search(r"(ne\s*suis\s*plus|plus\s*du\s*tout|pas\s*du\s*tout)\s*int[eé]ress[eé]r?", texte_complet):
             return {'label': 'lost_lead', 'score': 0.8}
         if any(mot in texte_complet for mot in mots_stuck):
             return {'label': 'bot_stuck', 'score': 0.8}

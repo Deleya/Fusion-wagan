@@ -238,11 +238,24 @@ def generer_reponse(message_utilisateur, numero_tel, sentiment=None, score=None)
                 system_enrichi += f" (confiance: {score})"
             system_enrichi += "."
 
-            if sentiment == "negative":
+            if sentiment == "angry":
                 system_enrichi += (
-                    "\n⚠️ Le client semble MÉCONTENT. Sois particulièrement empathique, "
+                    "\n⚠️ Le client est MÉCONTENT. Sois particulièrement empathique, "
                     "présente des excuses sincères et propose rapidement de le mettre "
-                    "en contact avec un conseiller humain."
+                    f"en contact avec un conseiller humain au {CONTACT_PHONE_NUMBER}."
+                )
+            elif sentiment == "bot_stuck":
+                system_enrichi += (
+                    "\n🧱 Le client est FRUSTRÉ par le bot ou demande un humain. "
+                    "Ne répète PAS tes réponses précédentes. Excuse-toi brièvement et "
+                    f"propose directement le conseiller humain au {CONTACT_PHONE_NUMBER}."
+                )
+            elif sentiment == "lost_lead":
+                system_enrichi += (
+                    "\n🚨 Le client montre des signes de DÉSINTÉRÊT ou d'abandon. "
+                    "Ne le harcèle pas : reconnais sa contrainte, propose UNE alternative "
+                    "concrète (liste d'attente, autre formation, conseiller humain) "
+                    "et laisse la porte ouverte poliment."
                 )
             elif sentiment == "positive":
                 system_enrichi += (
@@ -282,8 +295,11 @@ def generer_reponse(message_utilisateur, numero_tel, sentiment=None, score=None)
         return fallback_reponse(sentiment), True
 
 def fallback_reponse(sentiment):
+    message_desole = f"Je suis sincèrement désolé, je rencontre une petite difficulté technique. Un conseiller Bakeli sera disponible au {CONTACT_PHONE_NUMBER}."
     fallbacks = {
-        "negative": f"Je suis sincèrement désolé, je rencontre une petite difficulté technique. Un conseiller Bakeli sera disponible au {CONTACT_PHONE_NUMBER}.",
+        "angry": message_desole,
+        "bot_stuck": message_desole,
+        "negative": message_desole,  # rétrocompatibilité (alertes panne)
         "positive": f"Merci pour votre enthousiasme ! Je rencontre un petit souci technique, mais notre équipe reste disponible au {CONTACT_PHONE_NUMBER}.",
         "neutral": f"Merci pour votre message. Je rencontre une maintenance temporaire. N'hésitez pas à contacter Bakeli au {CONTACT_PHONE_NUMBER} ou via bakeli.tech."
     }

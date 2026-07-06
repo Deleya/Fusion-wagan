@@ -162,6 +162,24 @@ class ConversationState(models.Model):
     history = models.JSONField(default=list)  # Stocke une liste de dicts [{"role": "user", "content": "..."}, ...]
     updated_at = models.DateTimeField(auto_now=True)
 
+    # ===== Machine à états de qualification (voir qualification.py) =====
+    # Statut PERSISTANT du prospect — distinct du sentiment instantané des messages.
+    # Mis à jour uniquement par un signal fort ; 'neutral' ne dégrade jamais.
+    statut_prospect = models.CharField(
+        max_length=15,
+        choices=[
+            ('positive', 'Chaud (Hot Lead)'),
+            ('neutral', 'Froid / En exploration'),
+            ('lost_lead', 'Perdu / Désintéressé'),
+            ('bot_stuck', 'Bloqué (Impasse bot)'),
+            ('angry', 'Irrité / Mécontent'),
+        ],
+        default='neutral',
+        db_index=True,
+    )
+    statut_score = models.FloatField(default=0.5)
+    statut_updated_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         verbose_name = "État de la conversation"
         verbose_name_plural = "États des conversations"

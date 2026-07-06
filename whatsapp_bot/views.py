@@ -4,7 +4,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 import json
 from django.conf import settings
-from .models import Message, BotKnowledge
+from .models import Message, BotKnowledge, ConversationState
 from .celery_tasks import process_message_async
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -208,7 +208,20 @@ def dashboard_api(request):
         
         if msg.sentiment_label:
             users_latest_sentiment[msg.phone_number] = msg.sentiment_label
-            
+
+    # ===== MACHINE À ÉTATS (qualification.py) =====
+    # Le statut CRM d'un prospect est son état PERSISTANT (ConversationState),
+    # pas le label de son dernier message : un "ok merci" (neutral) ne doit
+    # pas masquer un "je m'inscris lundi" (positive) envoyé juste avant.
+    # Fallback sur le dernier label analysé pour les prospects sans état.
+    statuts_persistants = dict(
+        ConversationState.objects.filter(
+            phone_number__in=user_messages.keys(),
+            statut_updated_at__isnull=False,  # au moins un signal reçu
+        ).values_list('phone_number', 'statut_prospect')
+    )
+    users_latest_sentiment = {**users_latest_sentiment, **statuts_persistants}
+
     labels_values = list(users_latest_sentiment.values())
     positifs      = labels_values.count('positive')
     neutres       = labels_values.count('neutral')
@@ -245,19 +258,21 @@ def dashboard_api(request):
         if not sentiments_timeline:
             continue  # Aucun message analysé pour ce prospect
         
-        # Le prospect est converti SEULEMENT si son tout dernier sentiment est "positive"
-        # On exclut les cas où il était positif au milieu mais a abandonné ensuite (lost_lead)
-        dernier_sentiment = sentiments_timeline[-1]['label']
-        
-        if dernier_sentiment != 'positive':
+        # Le prospect est converti si son statut CRM (machine à états) est "positive".
+        # users_latest_sentiment contient le statut persistant (superposé plus haut) :
+        # un "ok merci" (neutral) final ne casse plus la détection de conversion.
+        if users_latest_sentiment.get(phone) != 'positive':
             continue  # Pas converti (neutral, lost_lead, bot_stuck, angry)
-        
+
         # Trouver le PREMIER "positive" stable :
-        # = le 1er message positif à partir duquel TOUS les suivants sont aussi positifs
+        # = le 1er message positif après lequel plus AUCUN signal à risque n'apparaît.
+        # Les 'neutral' (politesses, questions pratiques) n'invalident pas la stabilité.
         point_de_bascule_index = None
         for idx in range(len(sentiments_timeline)):
+            if sentiments_timeline[idx]['label'] != 'positive':
+                continue
             remaining = sentiments_timeline[idx:]
-            if all(s['label'] == 'positive' for s in remaining):
+            if all(s['label'] in ('positive', 'neutral') for s in remaining):
                 # On prend l'index TOTAL dans la conversation (msgs réels, pas juste analysés)
                 point_de_bascule_index = sentiments_timeline[idx]['msg_total_index']
                 break
@@ -410,11 +425,19 @@ def bot_config_api(request):
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def hot_leads_api(request):
-    numeros = Message.objects.order_by().values_list('phone_number', flat=True).distinct()
+    # Un hot lead = un prospect dont le statut CRM persistant est 'positive'
+    # (machine à états, qualification.py) — plus le label du dernier message,
+    # qu'une simple politesse de clôture ("ok merci") suffisait à masquer.
     hot_leads = []
-    for numero in numeros:
-        dernier_message = Message.objects.filter(phone_number=numero).order_by('-timestamp').first()
-        if dernier_message and dernier_message.sentiment_label == 'positive':
-            hot_leads.append({'phone_number': numero, 'last_message': dernier_message.message_text, 'sentiment_score': dernier_message.sentiment_score, 'timestamp': dernier_message.timestamp.isoformat()})
+    for state in ConversationState.objects.filter(statut_prospect='positive'):
+        dernier_message = Message.objects.filter(phone_number=state.phone_number).order_by('-timestamp').first()
+        if not dernier_message:
+            continue
+        hot_leads.append({
+            'phone_number': state.phone_number,
+            'last_message': dernier_message.message_text,
+            'sentiment_score': state.statut_score,
+            'timestamp': (state.statut_updated_at or dernier_message.timestamp).isoformat(),
+        })
     hot_leads.sort(key=lambda x: x['timestamp'], reverse=True)
     return Response({'hot_leads': hot_leads})

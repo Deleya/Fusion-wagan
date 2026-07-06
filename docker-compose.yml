@@ -17,7 +17,10 @@ services:
 
   web:
     build: .
-    command: gunicorn --workers=3 --bind 0.0.0.0:8000 wagan_project.wsgi:application
+    # --preload : charge Django AVANT de forker les workers. Sans ça, le 1er
+    # appel de chaque worker prend ~20s (imports lourds) et Meta abandonne la
+    # vérification du webhook (erreur 499 côté nginx).
+    command: gunicorn --workers=3 --preload --bind 0.0.0.0:8000 wagan_project.wsgi:application
     volumes:
       - .:/app
     ports:

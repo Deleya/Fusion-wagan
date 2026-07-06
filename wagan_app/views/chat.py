@@ -9,6 +9,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from rest_framework.permissions import IsAuthenticated
+
 from utils.ai_client import ask, ask_with_file
 
 
@@ -29,11 +31,9 @@ Je maîtrise : React.js, JavaScript, HTML, CSS, Bootstrap, marketing digital, de
 Mon objectif est de fournir des informations précises et pertinentes pour soutenir leur apprentissage et leurs projets.
 """
 
-# ⚠️ À remplacer par session ou BDD en production
-conversation_history = []
-
-
 class ChatAPIView(APIView):
+    # Chat réservé aux utilisateurs authentifiés (protection des crédits IA).
+    permission_classes = [IsAuthenticated]
 
     @swagger_auto_schema(
         request_body=openapi.Schema(
@@ -102,15 +102,18 @@ class ChatAPIView(APIView):
         # 💬 Choix du modèle selon le message
         model = self.select_model(message)
 
-        conversation_history.append({"role": "user", "content": message})
-        messages = [{"role": "system", "content": wagan_persona}] + conversation_history
+        # Contexte construit PAR REQUÊTE : jamais d'état partagé entre
+        # utilisateurs (l'ancienne liste globale mélangeait les conversations
+        # de tous les comptes dans le prompt du LLM).
+        messages = [
+            {"role": "system", "content": wagan_persona},
+            {"role": "user", "content": message},
+        ]
 
         try:
             wagan_response = ask(messages, model=model)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-        conversation_history.append({"role": "assistant", "content": wagan_response})
 
         return Response({
             "message":  "Data received",

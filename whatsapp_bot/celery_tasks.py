@@ -106,7 +106,7 @@ def process_message_async(self, phone_number, message_text, message_type, messag
 
         # --- Commande de test pour le développeur ---
         if message_type == 'text' and message_text.strip().lower() == 'reset':
-            Message.objects.filter(phone_number=phone_number).delete()
+            Message.objects.filter(phone_number=phone_number).exclude(id=message_id).delete()
             try:
                 from .models import ConversationState
                 ConversationState.objects.filter(phone_number=phone_number).delete()
@@ -119,10 +119,12 @@ def process_message_async(self, phone_number, message_text, message_type, messag
         from django.utils import timezone
         from datetime import timedelta
         
+        # La commande 'reset' est exclue : en cas de course avec un retry Meta,
+        # sa ligne peut survivre en base et ferait croire à une session active.
         dernier_message_avant = Message.objects.filter(
             phone_number=phone_number,
             processed=True
-        ).exclude(id=message_id).order_by('-timestamp').first()
+        ).exclude(id=message_id).exclude(message_text__iexact='reset').order_by('-timestamp').first()
 
         premier_message = False
         if not dernier_message_avant:
@@ -130,15 +132,30 @@ def process_message_async(self, phone_number, message_text, message_type, messag
         elif (timezone.now() - dernier_message_avant.timestamp) > timedelta(hours=12):
             premier_message = True
 
-        if premier_message and message_type == 'text':
-            print(f"👋 Premier message détecté pour {phone_number} — envoi des boutons d'amorce")
+        # Une salutation PURE ("bonjour", "slt", "salam"...) = entame de
+        # conversation → panel d'amorce SYSTÉMATIQUE, même en session active.
+        from .nlp_utils import est_salutation_pure
+        est_entame = premier_message or (
+            message_type == 'text' and est_salutation_pure(message_text)
+        )
+
+        if est_entame and message_type == 'text':
+            raison = "premier message" if premier_message else "salutation d'entame"
+            print(f"👋 Entame détectée ({raison}) pour {phone_number} — envoi du panel d'amorce")
             try:
                 from .whatsapp_sender import envoyer_boutons_amorce
                 envoyer_boutons_amorce(phone_number)
             except Exception as e:
                 print(f"❌ Erreur envoi boutons amorce: {e}")
+                # Ne JAMAIS laisser le prospect sans réponse : fallback texte.
+                try:
+                    reponse_secours = generer_amorce(message_text, phone_number)
+                    send_whatsapp_message(phone_number, reponse_secours)
+                    print("✅ Fallback amorce texte envoyé")
+                except Exception as e2:
+                    print(f"❌ Fallback amorce texte impossible: {e2}")
             # L'amorce étant le point de sortie, le message reste 'processed'
-            return  # Premier message traité par l'amorce, on s'arrête là
+            return  # Entame traitée par l'amorce, on s'arrête là
 
         # 1. Analyser sentiment GLOBAL (basé sur l'historique complet)
         sentiment_label = "neutral"
@@ -163,7 +180,10 @@ def process_message_async(self, phone_number, message_text, message_type, messag
 
                 print(f"📊 Analyse sentiment sur les {len(derniers_messages)} dernier(s) échange(s)")
 
-                resultat_ia = analyser_sentiment_global(derniers_messages)
+                # Statut CRM persistant injecté dans le prompt (détection des retournements)
+                statut_precedent = state.statut_prospect if state else None
+
+                resultat_ia = analyser_sentiment_global(derniers_messages, statut_precedent=statut_precedent)
                 sentiment_label = resultat_ia['label']
                 sentiment_score = resultat_ia['score']
                 print(f"📊 Sentiment GLOBAL: {sentiment_label} ({sentiment_score})")
@@ -180,6 +200,19 @@ def process_message_async(self, phone_number, message_text, message_type, messag
                 print(f"⏩ Bouton interactif non mappé (neutral par défaut): '{message_text}'")
         else:
             print(f"⏩ Type de message non analysé: {message_type} (neutral par défaut)")
+
+        # 1.5. Machine à états : mise à jour du statut PERSISTANT du prospect.
+        # Le sentiment du message est un signal instantané ; le statut prospect
+        # est l'état CRM qui pilote le dashboard, les hot leads et les alertes.
+        from .qualification import mettre_a_jour_statut_prospect, TRANSITION_RECUPERATION
+        statut_prospect = sentiment_label
+        transition = None
+        try:
+            statut_prospect, transition = mettre_a_jour_statut_prospect(
+                phone_number, sentiment_label, sentiment_score
+            )
+        except Exception as e:
+            print(f"❌ Erreur mise à jour statut prospect: {e}")
 
         # 2. Générer réponse IA
         reponse_ia, is_panne = generer_reponse(
@@ -212,6 +245,23 @@ def process_message_async(self, phone_number, message_text, message_type, messag
                 print(f"🚨 Tâche d'alerte PANNE IA planifiée pour le numéro {phone_number}")
             except Exception as e:
                 print(f"❌ Impossible de planifier la tâche d'alerte panne: {e}")
+        elif transition == TRANSITION_RECUPERATION:
+            # 🔥 Le signal commercial le plus précieux : un prospect perdu/mécontent
+            # revient avec une intention positive. Pas de cooldown : événement rare
+            # qui mérite une intervention humaine immédiate.
+            try:
+                send_admin_alerts_async.delay(
+                    phone_number=phone_number,
+                    message_text=message_text,
+                    sentiment_score=float(sentiment_score) if sentiment_score is not None else 0.5,
+                    sentiment_label='positive',
+                    derniers_messages=derniers_messages,
+                    is_panne=False,
+                    is_recovery=True
+                )
+                print(f"🔥 Alerte PROSPECT RÉCUPÉRÉ planifiée pour {phone_number}")
+            except Exception as e:
+                print(f"❌ Impossible de planifier l'alerte de récupération: {e}")
         elif sentiment_label in ['lost_lead', 'bot_stuck', 'angry']:
             try:
                 if should_send_alert(phone_number, sentiment_label):
@@ -258,11 +308,11 @@ def process_message_async(self, phone_number, message_text, message_type, messag
 
 
 @shared_task(bind=True, max_retries=3, acks_late=True)
-def send_admin_alerts_async(self, phone_number, message_text, sentiment_score, sentiment_label='negative', derniers_messages=None, is_panne=False):
+def send_admin_alerts_async(self, phone_number, message_text, sentiment_score, sentiment_label='negative', derniers_messages=None, is_panne=False, is_recovery=False):
     """
     Tâche Celery pour envoyer les alertes sur WhatsApp et Discord de manière isolée et résiliente.
     """
-    print(f"🚨 Début d'envoi des alertes pour {phone_number} (Panne={is_panne})...")
+    print(f"🚨 Début d'envoi des alertes pour {phone_number} (Panne={is_panne}, Récupération={is_recovery})...")
     whatsapp_error = None
     discord_error = None
 
@@ -271,6 +321,8 @@ def send_admin_alerts_async(self, phone_number, message_text, sentiment_score, s
         from .whatsapp_service import envoyer_alerte_whatsapp
         if is_panne:
             message_alerte = f"⚠️ *ALERTE PANNE IA*\nL'API Groq est injoignable.\nLe bot a utilisé le message de secours pour le numéro: {phone_number}\nMessage client: {message_text}"
+        elif is_recovery:
+            message_alerte = f"🔥 *PROSPECT RÉCUPÉRÉ — RAPPELER EN PRIORITÉ*\nCe prospect était perdu/mécontent et revient avec une intention d'inscription.\nNuméro: {phone_number}\nMessage: {message_text}"
         elif sentiment_label == 'lost_lead':
             message_alerte = f"⚠️ *PROSPECT PERDU / DÉSINTÉRESSÉ*\nLe prospect souhaite abandonner ou a dit au revoir.\nNuméro: {phone_number}\nMessage: {message_text}"
         elif sentiment_label == 'bot_stuck':

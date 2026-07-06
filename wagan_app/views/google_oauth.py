@@ -15,8 +15,10 @@ User = get_user_model()
 
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo"
-FRONTEND_URL = "http://localhost:5173"
-REDIRECT_URI = "http://localhost:8000/api/auth/google/callback/"
+# Configurables via variables d'environnement (voir settings/base.py) ;
+# les valeurs par défaut correspondent au dev local.
+FRONTEND_URL = getattr(settings, "FRONTEND_URL", "http://localhost:5173")
+REDIRECT_URI = getattr(settings, "GOOGLE_REDIRECT_URI", "http://localhost:8000/api/auth/google/callback/")
 
 
 class GoogleCallbackView(View):
@@ -62,10 +64,18 @@ class GoogleCallbackView(View):
                 return HttpResponseRedirect(f"{FRONTEND_URL}/auth/google?error=no_email")
 
             # 3. Créer ou récupérer l'utilisateur
+            # ⚠️ get_or_create n'appelle PAS CustomUserManager.create_user :
+            # il faut fournir username explicitement, sinon tous les comptes
+            # Google sont créés avec username='' et le champ étant unique,
+            # le 2e compte lève une IntegrityError (→ error=server_error).
             user, created = User.objects.get_or_create(
                 email=email,
-                defaults={"is_active": True}
+                defaults={"username": email, "is_active": True},
             )
+            if created:
+                # Compte créé via Google : pas de mot de passe classique utilisable
+                user.set_unusable_password()
+                user.save(update_fields=["password"])
 
             # 4. Générer les JWT Wagan
             refresh = RefreshToken.for_user(user)
@@ -82,6 +92,9 @@ class GoogleCallbackView(View):
         except requests.exceptions.RequestException as e:
             print(f"❌ Erreur réseau Google OAuth: {e}")
             return HttpResponseRedirect(f"{FRONTEND_URL}/auth/google?error=network_error")
-        except Exception as e:
-            print(f"❌ Erreur inattendue Google OAuth: {e}")
+        except Exception:
+            # Traceback complet dans les logs : indispensable pour diagnostiquer,
+            # car le front ne reçoit qu'un code générique 'server_error'.
+            import logging
+            logging.getLogger(__name__).exception("Erreur inattendue Google OAuth")
             return HttpResponseRedirect(f"{FRONTEND_URL}/auth/google?error=server_error")

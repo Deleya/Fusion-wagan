@@ -133,7 +133,7 @@ DJOSER = {
     },
 }
 
-DOMAIN = 'localhost:5173'
+DOMAIN = os.getenv("FRONTEND_URL", "http://localhost:5173").replace("https://", "").replace("http://", "").rstrip("/")
 SITE_NAME = 'Wagan'
 
 SOCIAL_AUTH_GOOGLE_OAUTH2_KEY = os.getenv('SOCIAL_AUTH_GOOGLE_OAUTH2_KEY', '')

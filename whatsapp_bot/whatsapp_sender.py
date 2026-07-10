@@ -42,6 +42,10 @@ def send_whatsapp_message(phone_number, message_text):
 def envoyer_boutons_amorce(phone_number):
     """
     Envoie un menu interactif avec 3 boutons pour guider l'utilisateur.
+
+    Lève une exception si Meta refuse l'envoi (ou en cas d'erreur réseau) :
+    c'est cette exception qui déclenche le fallback texte dans
+    process_message_async — sans elle, le prospect ne reçoit RIEN en silence.
     """
     url = f"https://graph.facebook.com/{VERSION}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
     
@@ -79,9 +83,11 @@ def envoyer_boutons_amorce(phone_number):
         }
     }
 
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        return response.json()
-    except Exception as e:
-        print(f"❌ Erreur envoi boutons WhatsApp: {e}")
-        return {"error": str(e)}
+    print(f"📤 Envoi boutons amorce vers {phone_number} (v{VERSION})")
+    response = requests.post(url, headers=headers, json=payload, timeout=10)
+    print(f"📥 Réponse Meta status={response.status_code}: {response.text}")
+
+    if response.status_code not in [200, 201]:
+        raise Exception(f"Erreur Meta boutons amorce (Status {response.status_code}): {response.text}")
+
+    return response.json()

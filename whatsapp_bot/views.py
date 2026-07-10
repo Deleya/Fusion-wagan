@@ -3,6 +3,11 @@ from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 import json
+import logging
+
+# logging écrit sur stderr (non bufferisé), contrairement aux print() qui
+# peuvent rester invisibles sous Gunicorn/systemd sans PYTHONUNBUFFERED=1.
+logger = logging.getLogger(__name__)
 from django.conf import settings
 from .models import Message, BotKnowledge, ConversationState
 from .celery_tasks import process_message_async
@@ -138,6 +143,7 @@ def whatsapp_webhook(request):
                         )
                         print(f"⏳ Tâche queued pour traitement async")
                     except Exception as celery_err:
+                        logger.exception(f"Erreur Redis/Celery — tâche NON queuée pour le message {message_obj.id}")
                         print(f"❌ Erreur Redis/Celery (message non traité) : {celery_err}")
             else:
                 message_obj = Message.objects.create(
@@ -158,6 +164,7 @@ def whatsapp_webhook(request):
                     )
                     print(f"⏳ Tâche queued pour traitement async")
                 except Exception as celery_err:
+                    logger.exception(f"Erreur Redis/Celery — tâche NON queuée pour le message {message_obj.id}")
                     print(f"❌ Erreur Redis/Celery (message non traité) : {celery_err}")
         else:
             print("⚠️  Aucun message à traiter")
@@ -171,6 +178,7 @@ def whatsapp_webhook(request):
         print("❌ Erreur : Le body n'est pas du JSON valide")
         return JsonResponse({"error": "Invalid JSON"}, status=400)
     except Exception as e:
+        logger.exception("Erreur inattendue dans le webhook WhatsApp (200 renvoyé à Meta quand même)")
         print(f"❌ Erreur inattendue : {e}")
         # Toujours retourner 200 à WhatsApp pour éviter les retries en boucle
         return JsonResponse({"status": "error_acknowledged"}, status=200)

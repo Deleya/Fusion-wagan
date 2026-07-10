@@ -4,7 +4,7 @@ from django.conf import settings
 from rest_framework.response import Response
 from django.shortcuts import render
 from rest_framework import views, serializers, status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 
 from chatbot.serializers import ChatInputSerializer, ChatResponseSerializer, DocumentUploadSerializer
 
@@ -16,9 +16,7 @@ class ChatView(views.APIView):
     """
     Vue pour gérer les interactions de chat avec le chatbot Wagan.
     """
-    # Chat réservé aux utilisateurs connectés : protège les crédits IA
-    # (l'endpoint était accessible anonymement).
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def post(self, request):
         """

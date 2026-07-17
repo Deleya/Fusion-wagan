@@ -145,12 +145,24 @@ def process_message_async(self, phone_number, message_text, message_type, messag
             try:
                 from .whatsapp_sender import envoyer_boutons_amorce
                 envoyer_boutons_amorce(phone_number)
+                Message.objects.create(
+                    phone_number=phone_number,
+                    message_text="Bonjour 👋, je suis l'Assistant Bakeli.\nPour quel métier ou domaine cherchez-vous une formation ?\n[Boutons: Je veux me former | J'ai une question | Être rappelé(e)]",
+                    role='bot',
+                    processed=True
+                )
             except Exception as e:
                 print(f"❌ Erreur envoi boutons amorce: {e}")
                 # Ne JAMAIS laisser le prospect sans réponse : fallback texte.
                 try:
                     reponse_secours = generer_amorce(message_text, phone_number)
                     send_whatsapp_message(phone_number, reponse_secours)
+                    Message.objects.create(
+                        phone_number=phone_number,
+                        message_text=reponse_secours,
+                        role='bot',
+                        processed=True
+                    )
                     print("✅ Fallback amorce texte envoyé")
                 except Exception as e2:
                     print(f"❌ Fallback amorce texte impossible: {e2}")
@@ -227,6 +239,12 @@ def process_message_async(self, phone_number, message_text, message_type, messag
         if reponse_ia:
             try:
                 result = send_whatsapp_message(phone_number, reponse_ia)
+                Message.objects.create(
+                    phone_number=phone_number,
+                    message_text=reponse_ia,
+                    role='bot',
+                    processed=True
+                )
                 print(f"📤 Message WhatsApp envoyé: {result}")
             except Exception as e:
                 print(f"❌ Impossible d'envoyer le WhatsApp final: {e}")

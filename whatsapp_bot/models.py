@@ -7,6 +7,7 @@ class Message(models.Model):
     
     phone_number = models.CharField(max_length=20, db_index=True)
     message_text = models.TextField()
+    role = models.CharField(max_length=10, default='user', choices=[('user', 'User'), ('bot', 'Bot')])
     
     sentiment_score = models.FloatField(null=True, blank=True)   # ex: 0.85
     sentiment_label = models.CharField(

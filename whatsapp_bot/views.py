@@ -13,7 +13,7 @@ from .models import Message, BotKnowledge, ConversationState
 from .celery_tasks import process_message_async
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAdminUser
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 
 
@@ -187,192 +187,173 @@ def whatsapp_webhook(request):
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def dashboard_api(request):
-    qs = Message.objects.all()
-    
-    start_date = request.GET.get('start_date')
-    end_date = request.GET.get('end_date')
-    
-    from django.utils.dateparse import parse_datetime
-    if start_date:
-        parsed_start = parse_datetime(start_date)
-        if parsed_start:
-            qs = qs.filter(timestamp__gte=parsed_start)
-    if end_date:
-        parsed_end = parse_datetime(end_date)
-        if parsed_end:
-            qs = qs.filter(timestamp__lte=parsed_end)
-            
-    total = qs.count()
-    utilisateurs = qs.values('phone_number').distinct().count()
-    pending = qs.filter(processed=False).count()
-    
-    users_latest_sentiment = {}
-    user_messages = {}
-    
-    for msg in qs.order_by('timestamp'):
-        if msg.phone_number not in user_messages:
-            user_messages[msg.phone_number] = []
-        user_messages[msg.phone_number].append(msg)
+    try:
+        # On filtre uniquement sur les messages entrants du prospect (role='user')
+        # Les messages du bot (role='bot') ne doivent pas être comptabilisés dans les KPIs.
+        qs = Message.objects.filter(role='user')
         
-        if msg.sentiment_label:
-            users_latest_sentiment[msg.phone_number] = msg.sentiment_label
-
-    # ===== MACHINE À ÉTATS (qualification.py) =====
-    # Le statut CRM d'un prospect est son état PERSISTANT (ConversationState),
-    # pas le label de son dernier message : un "ok merci" (neutral) ne doit
-    # pas masquer un "je m'inscris lundi" (positive) envoyé juste avant.
-    # Fallback sur le dernier label analysé pour les prospects sans état.
-    statuts_persistants = dict(
-        ConversationState.objects.filter(
-            phone_number__in=user_messages.keys(),
-            statut_updated_at__isnull=False,  # au moins un signal reçu
-        ).values_list('phone_number', 'statut_prospect')
-    )
-    users_latest_sentiment = {**users_latest_sentiment, **statuts_persistants}
-
-    labels_values = list(users_latest_sentiment.values())
-    positifs      = labels_values.count('positive')
-    neutres       = labels_values.count('neutral')
-    nb_lost_leads = labels_values.count('lost_lead')
-    nb_bot_stuck  = labels_values.count('bot_stuck')
-    nb_angry      = labels_values.count('angry')
-
-    # nb_analyses inclut tous les labels réels (on retire le label obsolète 'negative')
-    nb_analyses = positifs + neutres + nb_lost_leads + nb_bot_stuck + nb_angry
-
-    p_positif = round((positifs / nb_analyses * 100), 1) if nb_analyses > 0 else 0
-    p_neutre  = round((neutres  / nb_analyses * 100), 1) if nb_analyses > 0 else 0
-    
-    # ===== ANALYSE DE CONVERSION APPROFONDIE =====
-    # Logique : un prospect est "converti" si son DERNIER sentiment analysé est "positive".
-    # avg_messages_to_convert = moyenne du nb de msgs TOTAUX échangés avant que le prospect
-    # devienne positif pour la 1ère fois de manière stable (= reste positif jusqu'à la fin).
-    # On compte les msgs totaux (pas juste ceux analysés) car l'amorce et les boutons
-    # font partie de l'effort de conviction.
-    conversion_counts = []
-    nb_prospects_convertis = 0
-    
-    for phone, msgs in user_messages.items():
-        # Construire la timeline des sentiments analysés
-        sentiments_timeline = []
-        for i, m in enumerate(msgs):
-            if m.sentiment_label:
-                sentiments_timeline.append({
-                    'msg_total_index': i + 1,  # position RÉELLE dans la conversation (tous msgs inclus)
-                    'label': m.sentiment_label,
-                    'score': m.sentiment_score or 0.5
-                })
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
         
-        if not sentiments_timeline:
-            continue  # Aucun message analysé pour ce prospect
-        
-        # Le prospect est converti si son statut CRM (machine à états) est "positive".
-        # users_latest_sentiment contient le statut persistant (superposé plus haut) :
-        # un "ok merci" (neutral) final ne casse plus la détection de conversion.
-        if users_latest_sentiment.get(phone) != 'positive':
-            continue  # Pas converti (neutral, lost_lead, bot_stuck, angry)
-
-        # Trouver le PREMIER "positive" stable :
-        # = le 1er message positif après lequel plus AUCUN signal à risque n'apparaît.
-        # Les 'neutral' (politesses, questions pratiques) n'invalident pas la stabilité.
-        point_de_bascule_index = None
-        for idx in range(len(sentiments_timeline)):
-            if sentiments_timeline[idx]['label'] != 'positive':
-                continue
-            remaining = sentiments_timeline[idx:]
-            if all(s['label'] in ('positive', 'neutral') for s in remaining):
-                # On prend l'index TOTAL dans la conversation (msgs réels, pas juste analysés)
-                point_de_bascule_index = sentiments_timeline[idx]['msg_total_index']
-                break
+        from django.utils.dateparse import parse_datetime
+        if start_date:
+            parsed_start = parse_datetime(start_date)
+            if parsed_start:
+                qs = qs.filter(timestamp__gte=parsed_start)
+        if end_date:
+            parsed_end = parse_datetime(end_date)
+            if parsed_end:
+                qs = qs.filter(timestamp__lte=parsed_end)
                 
-        if point_de_bascule_index is not None:
-            nb_prospects_convertis += 1
-            conversion_counts.append(point_de_bascule_index)
+        total = qs.count()
+        utilisateurs = qs.values('phone_number').distinct().count()
+        pending = qs.filter(processed=False).count()
+        
+        users_latest_sentiment = {}
+        user_messages = {}
+        
+        for msg in qs.order_by('timestamp'):
+            if msg.phone_number not in user_messages:
+                user_messages[msg.phone_number] = []
+            user_messages[msg.phone_number].append(msg)
             
-    avg_messages_to_convert = 0
-    if conversion_counts:
-        avg_messages_to_convert = round(sum(conversion_counts) / len(conversion_counts), 1)
+            if msg.sentiment_label:
+                users_latest_sentiment[msg.phone_number] = msg.sentiment_label
+
+        statuts_persistants = dict(
+            ConversationState.objects.filter(
+                phone_number__in=user_messages.keys(),
+                statut_updated_at__isnull=False,
+            ).values_list('phone_number', 'statut_prospect')
+        )
+        users_latest_sentiment = {**users_latest_sentiment, **statuts_persistants}
+
+        labels_values = list(users_latest_sentiment.values())
+        positifs      = labels_values.count('positive')
+        neutres       = labels_values.count('neutral')
+        nb_lost_leads = labels_values.count('lost_lead')
+        nb_bot_stuck  = labels_values.count('bot_stuck')
+        nb_angry      = labels_values.count('angry')
+
+        nb_analyses = positifs + neutres + nb_lost_leads + nb_bot_stuck + nb_angry
+
+        p_positif = round((positifs / nb_analyses * 100), 1) if nb_analyses > 0 else 0
+        p_neutre  = round((neutres  / nb_analyses * 100), 1) if nb_analyses > 0 else 0
         
-    # Taux de conversion réel
-    taux_conversion = 0
-    if utilisateurs > 0:
-        taux_conversion = round((nb_prospects_convertis / utilisateurs * 100), 1)
-    
-    # Mapping complet des 5 labels vers un statut lisible + couleur pour le frontend
-    STATUT_MAP = {
-        'positive':  ('Chaud 🔥',      '#22c55e'),
-        'neutral':   ('Froid ❄️',       '#6b7280'),
-        'lost_lead': ('Perdu 🚨',       '#f59e0b'),
-        'bot_stuck': ('Bloqué 🧱',      '#f97316'),
-        'angry':     ('Irrité 😡',      '#ef4444'),
-    }
-
-    # Liste détaillée des prospects
-    prospects_list = []
-    for phone, msgs in user_messages.items():
-        first_contact = msgs[0].timestamp.isoformat()
-        last_contact = msgs[-1].timestamp.isoformat()
-        nb_msgs = len(msgs)
-        sentiment = users_latest_sentiment.get(phone, 'inconnu')
+        conversion_counts = []
+        nb_prospects_convertis = 0
         
-        # Score de confiance moyen
-        scores = [m.sentiment_score for m in msgs if m.sentiment_score is not None]
-        avg_score = round(sum(scores) / len(scores), 2) if scores else 0
+        for phone, msgs in user_messages.items():
+            sentiments_timeline = []
+            for i, m in enumerate(msgs):
+                if m.sentiment_label:
+                    sentiments_timeline.append({
+                        'msg_total_index': i + 1,
+                        'label': m.sentiment_label,
+                        'score': m.sentiment_score or 0.5
+                    })
+            
+            if not sentiments_timeline:
+                continue
+            
+            if users_latest_sentiment.get(phone) != 'positive':
+                continue
+
+            point_de_bascule_index = None
+            for idx in range(len(sentiments_timeline)):
+                if sentiments_timeline[idx]['label'] != 'positive':
+                    continue
+                remaining = sentiments_timeline[idx:]
+                if all(s['label'] in ('positive', 'neutral') for s in remaining):
+                    point_de_bascule_index = sentiments_timeline[idx]['msg_total_index']
+                    break
+                    
+            if point_de_bascule_index is not None:
+                nb_prospects_convertis += 1
+                conversion_counts.append(point_de_bascule_index)
+                
+        avg_messages_to_convert = 0
+        if conversion_counts:
+            avg_messages_to_convert = round(sum(conversion_counts) / len(conversion_counts), 1)
+            
+        taux_conversion = 0
+        if utilisateurs > 0:
+            taux_conversion = round((nb_prospects_convertis / utilisateurs * 100), 1)
+            
+        STATUT_MAP = {
+            'positive':  ('Chaud 🔥',         '#22c55e'),
+            'neutral':   ('En exploration 🔎', '#6b7280'),
+            'lost_lead': ('Perdu 🚨',         '#f59e0b'),
+            'bot_stuck': ('Bloqué 🧱',       '#f97316'),
+            'angry':     ('Irrité 😡',       '#ef4444'),
+        }
+
+        prospects_list = []
+        for phone, msgs in user_messages.items():
+            first_contact = msgs[0].timestamp.isoformat()
+            last_contact = msgs[-1].timestamp.isoformat()
+            nb_msgs = Message.objects.filter(phone_number=phone).count()
+            sentiment = users_latest_sentiment.get(phone, 'inconnu')
+            
+            scores = [m.sentiment_score for m in msgs if m.sentiment_score is not None]
+            avg_score = round(sum(scores) / len(scores), 2) if scores else 0
+            
+            statut_info = STATUT_MAP.get(sentiment, ('En attente ⏳', '#3b82f6'))
+            statut = statut_info[0]
+            color  = statut_info[1]
+
+            prospects_list.append({
+                'phone': phone,
+                'nb_messages': nb_msgs,
+                'first_contact': first_contact,
+                'last_contact': last_contact,
+                'sentiment': sentiment,
+                'statut': statut,
+                'color': color,
+                'avg_score': avg_score,
+            })
         
-        statut_info = STATUT_MAP.get(sentiment, ('En attente ⏳', '#3b82f6'))
-        statut = statut_info[0]
-        color  = statut_info[1]
+        prospects_list.sort(key=lambda x: x['last_contact'], reverse=True)
 
-        prospects_list.append({
-            'phone': phone,
-            'nb_messages': nb_msgs,
-            'first_contact': first_contact,
-            'last_contact': last_contact,
-            'sentiment': sentiment,
-            'statut': statut,
-            'color': color,
-            'avg_score': avg_score,
-        })
-    
-    # Trier par dernier contact desc
-    prospects_list.sort(key=lambda x: x['last_contact'], reverse=True)
+        from datetime import timedelta
+        prospects_with_stuck = sum(
+            1 for msgs in user_messages.values()
+            if any(m.sentiment_label == 'bot_stuck' for m in msgs)
+        )
+        taux_bot_stuck = round((prospects_with_stuck / utilisateurs * 100), 1) if utilisateurs > 0 else 0
 
-    # KPI : % de prospects avec au moins 1 message bot_stuck
-    from datetime import timedelta
-    prospects_with_stuck = sum(
-        1 for msgs in user_messages.values()
-        if any(m.sentiment_label == 'bot_stuck' for m in msgs)
-    )
-    taux_bot_stuck = round((prospects_with_stuck / utilisateurs * 100), 1) if utilisateurs > 0 else 0
+        hier = timezone.now() - timedelta(hours=24)
+        hot_leads_today = sum(
+            1 for phone, msgs in user_messages.items()
+            if users_latest_sentiment.get(phone) == 'positive' and msgs[-1].timestamp >= hier
+        )
 
-    # KPI : hot leads des dernières 24h (sentiment positif + dernier message récent)
-    hier = timezone.now() - timedelta(hours=24)
-    hot_leads_today = sum(
-        1 for phone, msgs in user_messages.items()
-        if users_latest_sentiment.get(phone) == 'positive' and msgs[-1].timestamp >= hier
-    )
-
-    context = {
-        'total': total,
-        'utilisateurs': utilisateurs,
-        'positifs': positifs,
-        'neutres': neutres,
-        'nb_lost_leads': nb_lost_leads,
-        'nb_bot_stuck': nb_bot_stuck,
-        'nb_angry': nb_angry,
-        'pending': pending,
-        'nb_analyses': nb_analyses,
-        'p_positif': p_positif,
-        'p_neutre': p_neutre,
-        'avg_messages_to_convert': avg_messages_to_convert,
-        'nb_prospects_convertis': nb_prospects_convertis,
-        'taux_conversion': taux_conversion,
-        'taux_bot_stuck': taux_bot_stuck,
-        'hot_leads_today': hot_leads_today,
-        'prospects_list': prospects_list,
-        'now': timezone.now().isoformat()
-    }
-    return Response(context)
+        context = {
+            'total': total,
+            'utilisateurs': utilisateurs,
+            'positifs': positifs,
+            'neutres': neutres,
+            'nb_lost_leads': nb_lost_leads,
+            'nb_bot_stuck': nb_bot_stuck,
+            'nb_angry': nb_angry,
+            'pending': pending,
+            'nb_analyses': nb_analyses,
+            'p_positif': p_positif,
+            'p_neutre': p_neutre,
+            'avg_messages_to_convert': avg_messages_to_convert,
+            'nb_prospects_convertis': nb_prospects_convertis,
+            'taux_conversion': taux_conversion,
+            'taux_bot_stuck': taux_bot_stuck,
+            'hot_leads_today': hot_leads_today,
+            'prospects_list': prospects_list,
+            'now': timezone.now().isoformat()
+        }
+        return Response(context)
+    except Exception as e:
+        import traceback
+        with open("dashboard_error.log", "w") as f:
+            f.write(traceback.format_exc())
+        return Response({"detail": str(e), "traceback": traceback.format_exc()}, status=500)
 
 
 # ============================================================
@@ -449,3 +430,22 @@ def hot_leads_api(request):
         })
     hot_leads.sort(key=lambda x: x['timestamp'], reverse=True)
     return Response({'hot_leads': hot_leads})
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def prospect_messages_api(request, phone_number):
+    """
+    GET /whatsapp/prospects/<phone_number>/messages/
+    Retourne l'historique complet de la conversation stocké dans Message.
+    """
+    messages_qs = Message.objects.filter(phone_number=phone_number).order_by('timestamp')
+    
+    history = []
+    for msg in messages_qs:
+        history.append({
+            'role': msg.role,
+            'content': msg.message_text,
+            'timestamp': msg.timestamp.isoformat()
+        })
+        
+    return Response({'messages': history})

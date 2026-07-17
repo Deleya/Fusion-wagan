@@ -1,6 +1,9 @@
 import os
 import re
 import tempfile
+import socket
+import ipaddress
+from urllib.parse import urlparse
 
 import requests
 from drf_yasg import openapi
@@ -9,7 +12,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 
 from utils.ai_client import ask, ask_with_file
 
@@ -32,8 +35,8 @@ Mon objectif est de fournir des informations précises et pertinentes pour soute
 """
 
 class ChatAPIView(APIView):
-    # Chat réservé aux utilisateurs authentifiés (protection des crédits IA).
-    permission_classes = [IsAuthenticated]
+    # Rendu public suite à la demande pour l'intégration Rocket.chat / site web
+    permission_classes = [AllowAny]
 
     @swagger_auto_schema(
         request_body=openapi.Schema(
@@ -82,6 +85,12 @@ class ChatAPIView(APIView):
 
         # 🔗 Traitement du lien externe (GitHub ou autre)
         if github:
+            if not self.is_safe_url(github):
+                return Response(
+                    {"error": "URL non autorisée. Les adresses locales ou privées sont interdites (Protection SSRF)."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
             try:
                 if "github.com" in github:
                     link_content = self.get_github_code(github)
@@ -121,6 +130,34 @@ class ChatAPIView(APIView):
             "model":    model,
             "response": wagan_response,
         }, status=status.HTTP_200_OK)
+
+    # ------------------------------------------------------------------ #
+    #  Sécurité et Utilitaires                                            #
+    # ------------------------------------------------------------------ #
+
+    def is_safe_url(self, url: str) -> bool:
+        """Vérifie que l'URL est sûre (pas d'IP locale/privée) pour éviter le SSRF."""
+        try:
+            parsed = urlparse(url)
+            if parsed.scheme not in ("http", "https"):
+                return False
+            hostname = parsed.hostname
+            if not hostname:
+                return False
+            
+            # Bloquer explicitement localhost
+            if hostname.lower() in ("localhost", "127.0.0.1", "::1"):
+                return False
+                
+            # Résoudre l'IP pour bloquer les réseaux internes
+            ip = socket.gethostbyname(hostname)
+            ip_obj = ipaddress.ip_address(ip)
+            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local:
+                return False
+                
+            return True
+        except Exception:
+            return False
 
     # ------------------------------------------------------------------ #
     #  Sélection automatique du modèle                                    #

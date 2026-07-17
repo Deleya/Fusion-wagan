@@ -190,12 +190,18 @@ The conversion algorithm (in `views.py`) relies on the latest calculated sentime
 - **❄️ Cold Prospect (`neutral`)**: In the discovery phase or simply said "Hello".
 - **🚨 Human Alert (`negative`)**: Disinterest or highly specific unmet need. The system immediately notifies administrators via Discord and WhatsApp.
 
-## 🔐 Security & Audit
+## 🔐 Security & Audit (FR & EN)
+
+Lors de notre dernier audit de sécurité, nous avons mis en place :
+- **Protection Anti-SSRF** : Le chatbot refuse d'analyser des URLs pointant vers des réseaux locaux ou privés (protection stricte par liste blanche IP/domaine).
+- **API Publique Sécurisée** : L'endpoint `/api/wagan/chat/` est ouvert sans token (`AllowAny`) pour s'intégrer nativement avec Rocket.chat et les sites web externes.
+- **CORS Dynamique** : Politique stricte globale qui autorise exclusivement l'écosystème `*.bakeli.tech` (via Regex) tout en gardant l'API sécurisée.
+- **Isolation des contextes** : Le pipeline IA ne mélange jamais les mémoires de conversation entre les différentes requêtes.
 
 During our final audit, we validated:
-- Total isolation of private keys via `.env`.
-- Decoupling network requests to Meta via Celery to never exceed the 3-second Meta Webhook timeout.
-- Robustness of the AI fallback (in case of a Groq failure, a specific "AI OUTAGE" alert is sent to the staff for manual takeover).
+- **SSRF Shield**: The bot strictly blocks internal/private IP requests when analyzing external links.
+- **Public Chat API**: The main endpoint `/api/wagan/chat/` accepts unauthenticated requests for easy external integration (Rocket.chat, websites) while protecting the rest of the Django Admin pipeline.
+- Total isolation of private keys via `.env` and decoupling network requests to Meta via Celery.
 
 ---
 *This project was built and documented on the `chrys` branch.*
